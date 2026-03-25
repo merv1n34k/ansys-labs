@@ -1,0 +1,198 @@
+\input{../common/preamble}
+\usepackage{../common/labstyle}
+
+\labnum{2}
+\labtitle{Гідродинаміка потоку}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Вихідні дані}
+% ═══════════════════════════════════════════════════════════════════
+
+\begin{table}[H]
+  \centering
+  \caption{Вихідні дані (варіант~13)}
+  \begin{tabularx}{0.75\textwidth}{Xr}
+    \toprule
+    \textbf{Параметр} & \textbf{Значення} \\
+    \midrule
+    Об'єкт дослідження         & Конус (воронка) \\
+    Положення відносно потоку  & Широким кінцем проти потоку \\
+    Швидкість на вході (Inlet) & 1{,}3~м/с \\
+    Діаметр труби              & 100~мм \\
+    Довжина труби              & 300~мм \\
+    Матеріал потоку            & Water \\
+    Макс.\ габарити об'єкта    & $50 \times 50 \times 50$~мм \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Теоретичні відомості}
+% ═══════════════════════════════════════════════════════════════════
+
+\subsection{Рівняння Нав'є--Стокса}
+
+CFD-аналіз базується на чисельному розв'язанні рівнянь Нав'є--Стокса для в'язкої нестисливої рідини.
+
+Рівняння нерозривності (continuity equation):
+\begin{equation}
+  \nabla \cdot \mathbf{U} = 0.
+\end{equation}
+
+Рівняння імпульсу (momentum equation):
+\begin{equation}
+  \rho\left(\frac{\partial \mathbf{U}}{\partial t}
+  + (\mathbf{U}\cdot\nabla)\mathbf{U}\right)
+  = -\nabla p + \mu\,\nabla^2\mathbf{U} + \mathbf{F},
+\end{equation}
+де $\rho$~--- густина, $\mathbf{U}$~--- вектор швидкості, $p$~--- тиск, $\mu$~--- динамічна в'язкість, $\mathbf{F}$~--- масові сили.
+
+\subsection{Число Рейнольдса (Reynolds number)}
+
+\begin{equation}
+  \mathrm{Re} = \frac{\rho\, U\, D}{\mu} = \frac{U\, D}{\nu},
+\end{equation}
+де $D$~--- характерний розмір (діаметр труби), $\nu$~--- кінематична в'язкість.
+
+Режими течії: $\mathrm{Re} < 2300$~--- ламінарний; $2300 < \mathrm{Re} < 4000$~--- перехідний; $\mathrm{Re} > 4000$~--- турбулентний.
+
+\subsection{Рівняння Бернуллі}
+
+Для горизонтальної труби (без врахування гравітації):
+\begin{equation}
+  p_1 + \tfrac{1}{2}\rho\, U_1^2 = p_2 + \tfrac{1}{2}\rho\, U_2^2.
+\end{equation}
+
+Рівняння нерозривності для нестисливої рідини:
+\begin{equation}
+  A_1\, U_1 = A_2\, U_2.
+\end{equation}
+
+\subsection{Модель турбулентності $k$-$\varepsilon$}
+
+Модель $k$-$\varepsilon$ розв'язує два додаткові транспортні рівняння:
+
+\begin{equation}
+  \frac{\partial(\rho k)}{\partial t} + \nabla\cdot(\rho k \mathbf{U})
+  = \nabla\cdot\!\left[\left(\mu + \frac{\mu_t}{\sigma_k}\right)\nabla k\right]
+  + P_k - \rho\varepsilon,
+\end{equation}
+
+\begin{equation}
+  \frac{\partial(\rho\varepsilon)}{\partial t} + \nabla\cdot(\rho\varepsilon \mathbf{U})
+  = \nabla\cdot\!\left[\left(\mu + \frac{\mu_t}{\sigma_\varepsilon}\right)\nabla\varepsilon\right]
+  + C_{1\varepsilon}\frac{\varepsilon}{k}P_k
+  - C_{2\varepsilon}\rho\frac{\varepsilon^2}{k},
+\end{equation}
+де турбулентна в'язкість $\mu_t = \rho\, C_\mu\, k^2/\varepsilon$. Константи: $C_\mu = 0{,}09$, $C_{1\varepsilon} = 1{,}44$, $C_{2\varepsilon} = 1{,}92$, $\sigma_k = 1{,}0$, $\sigma_\varepsilon = 1{,}3$.
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Хронологічна послідовність виконання}
+% ═══════════════════════════════════════════════════════════════════
+
+\begin{enumerate}
+  \item \textbf{Побудова геометрії (SpaceClaim).}
+    Створено циліндричну трубу (внутрішній діаметр 100~мм, довжина 300~мм). По центру труби розміщено конус (воронку) у межах куба $50\times50\times50$~мм, широким кінцем проти потоку. Виконано Boolean Subtract для створення порожнини, яку омиває рідина.
+
+  \item \textbf{Іменування границь (Named Selections).}
+    Визначено Named Selections: Inlet (вхідний перетин), Outlet (вихідний перетин), Wall (стінки труби та об'єкта).
+
+  \item \textbf{Побудова сітки (Meshing).}
+    Побудовано тетраедральну сітку з Inflation layers біля стінок. Виконано ущільнення (Refinement) навколо об'єкта.
+
+  \item \textbf{Налаштування фізики (CFX-Pre).}
+    \begin{itemize}
+      \item Analysis Type: Steady State;
+      \item Default Domain: Water, Reference Pressure $= 1$~atm;
+      \item Turbulence model: $k$-$\varepsilon$;
+      \item Inlet: Normal Speed $= 1{,}3$~м/с, Turbulence Intensity $= 5\%$;
+      \item Outlet: Average Static Pressure $= 0$~Па (відносний);
+      \item Wall: No Slip, Smooth Wall.
+    \end{itemize}
+
+  \item \textbf{Solver Control.}
+    Advection Scheme: High Resolution. Residual Target: $10^{-4}$ (RMS).
+
+  \item \textbf{Розрахунок (CFX-Solver).}
+    Запущено розрахунок. Перевірено збіжність за залишками (residuals).
+
+  \item \textbf{Аналіз результатів (CFX-Post).}
+    Побудовано площину (Plane) через центр домену. На ній виведено Contour, Streamline та Vector візуалізації.
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Візуалізація моделі}
+% ═══════════════════════════════════════════════════════════════════
+
+\placeholder{Геометрія труби з вирізаним конусом (воронкою)}
+
+\placeholder{Розрахункова сітка (Mesh) з ущільненням навколо об'єкта}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Результати розрахунку}
+% ═══════════════════════════════════════════════════════════════════
+
+\subsection{Velocity}
+\placeholder{Contour: розподіл швидкості (Velocity)}
+
+\subsection{Pressure}
+\placeholder{Contour: розподіл тиску (Pressure)}
+
+\subsection{Shear Strain Rate}
+\placeholder{Contour: Shear Strain Rate}
+
+\subsection{Turbulence Kinetic Energy}
+\placeholder{Contour: Turbulence Kinetic Energy}
+
+\subsection{Turbulence Eddy Frequency}
+\placeholder{Contour: Turbulence Eddy Frequency}
+
+\subsection{Streamline}
+\placeholder{Лінії току (Streamline)}
+
+\subsection{Vector}
+\placeholder{Вектори швидкості (Vector)}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Кількісний аналіз (Function Calculator)}
+% ═══════════════════════════════════════════════════════════════════
+
+\begin{table}[H]
+  \centering
+  \caption{Результати Function Calculator}
+  \begin{tabularx}{0.85\textwidth}{Xlrr}
+    \toprule
+    \textbf{Параметр} & \textbf{Функція} & \textbf{Зона} & \textbf{Значення} \\
+    \midrule
+    Velocity     & maxVal  & Default Domain & \result{---} \\
+    Velocity     & areaAve & Outlet         & \result{---} \\
+    Velocity     & areaAve & Inlet          & \result{---} \\
+    Pressure     & maxVal  & Default Domain & \result{---} \\
+    Pressure     & minVal  & Default Domain & \result{---} \\
+    Pressure     & areaAve & Inlet          & \result{---} \\
+    Shear Strain Rate & maxVal & Default Domain & \result{---} \\
+    Turb.\ Kinetic Energy & maxVal & Default Domain & \result{---} \\
+    Turb.\ Eddy Frequency & maxVal & Default Domain & \result{---} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Аналіз та висновок}
+% ═══════════════════════════════════════════════════════════════════
+
+\result{Детальний опис процесів на кожній епюрі:
+\begin{itemize}
+  \item Зони застою (stagnation zones) --- перед широким кінцем конуса;
+  \item Прискорення потоку --- у звуженні між конусом та стінками труби;
+  \item Завихрення (recirculation) --- за конусом у кільвій зоні (wake zone);
+  \item Розподіл Turbulence Kinetic Energy та Eddy Frequency;
+  \item Загальний висновок про вплив форми конуса на гідродинамічний опір.
+\end{itemize}}
+
+\end{document}

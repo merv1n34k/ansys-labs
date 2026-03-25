@@ -1,0 +1,172 @@
+\input{../common/preamble}
+\usepackage{../common/labstyle}
+
+\labnum{1}
+\labtitle{Міцнісний аналіз}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Вихідні дані}
+% ═══════════════════════════════════════════════════════════════════
+
+Параметри моделі згідно з варіантом~13:
+
+\begin{table}[H]
+  \centering
+  \caption{Вихідні дані (варіант~13)}
+  \begin{tabularx}{0.75\textwidth}{Xr}
+    \toprule
+    \textbf{Параметр} & \textbf{Значення} \\
+    \midrule
+    Верхня кришка              & Плоска \\
+    Нижня кришка               & Сферична \\
+    Товщина стінки             & 2{,}1~мм \\
+    Внутрішній тиск            & 1{,}1~МПа \\
+    Робоча температура         & 75~°C \\
+    Зовнішня висота ємності    & 1000~мм \\
+    Зовнішній діаметр ємності  & 500~мм \\
+    Матеріал                   & Stainless Steel \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Опори для ємності спроектовані самостійно у вигляді \result{тип опор --- описати}.
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Теоретичні відомості}
+% ═══════════════════════════════════════════════════════════════════
+
+Міцнісний аналіз (Static Structural) базується на методі скінченних елементів (МСЕ, Finite Element Method --- FEM). Основне рівняння статичної рівноваги має вигляд:
+\begin{equation}
+  [K]\{u\} = \{F\},
+\end{equation}
+де $[K]$~--- матриця жорсткості (stiffness matrix), $\{u\}$~--- вектор переміщень (displacement vector), $\{F\}$~--- вектор навантажень (force vector).
+
+\subsection{Equivalent Stress (von~Mises)}
+
+Еквівалентні напруження за теорією Мізеса об'єднують усі компоненти тензора напружень у скалярну величину:
+\begin{equation}
+  \sigma_{\mathrm{eq}} = \sqrt{\frac{1}{2}\left[
+    (\sigma_1 - \sigma_2)^2 +
+    (\sigma_2 - \sigma_3)^2 +
+    (\sigma_3 - \sigma_1)^2
+  \right]},
+\end{equation}
+де $\sigma_1, \sigma_2, \sigma_3$~--- головні напруження.
+
+Якщо $\sigma_{\mathrm{eq}} > \sigma_{\mathrm{yield}}$ (Tensile Yield Strength), матеріал переходить у пластичну зону.
+
+\subsection{Total Deformation}
+
+Повне переміщення кожної точки:
+\begin{equation}
+  U_{\mathrm{total}} = \sqrt{U_x^2 + U_y^2 + U_z^2}.
+\end{equation}
+
+\subsection{Safety Factor}
+
+Запас міцності визначається як:
+\begin{equation}
+  n = \frac{\sigma_{\mathrm{yield}}}{\sigma_{\mathrm{eq}}}.
+\end{equation}
+
+Якщо $n \geq 1$~--- конструкція витримує навантаження; $n < 1$~--- ні.
+
+\subsection{Властивості матеріалу Stainless Steel}
+
+\begin{table}[H]
+  \centering
+  \caption{Фізико-механічні властивості Stainless Steel}
+  \begin{tabularx}{0.75\textwidth}{Xr}
+    \toprule
+    \textbf{Властивість} & \textbf{Значення} \\
+    \midrule
+    Density                    & 7750~кг/м$^3$ \\
+    Young's Modulus            & 193~ГПа \\
+    Poisson's Ratio            & 0{,}31 \\
+    Tensile Yield Strength     & 207~МПа \\
+    Tensile Ultimate Strength  & 586~МПа \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Хронологічна послідовність виконання}
+% ═══════════════════════════════════════════════════════════════════
+
+Робота виконана у модулі Static Structural комплексу ANSYS Workbench за наступними етапами:
+
+\begin{enumerate}
+  \item \textbf{Побудова геометрії.}
+    Тривимірна модель вертикальної циліндричної ємності побудована в SpaceClaim (або імпортована зі STEP-файлу). Геометрія включає циліндричний корпус висотою 1000~мм, діаметром 500~мм, товщиною стінки 2{,}1~мм, плоску верхню кришку та сферичну нижню кришку. Додано опори для забезпечення стійкості.
+
+  \item \textbf{Задання матеріалу (Engineering Data).}
+    У розділі Engineering Data обрано матеріал Stainless Steel зі стандартної бібліотеки ANSYS. Перевірено відповідність механічних властивостей.
+
+  \item \textbf{Побудова сітки (Meshing).}
+    Побудовано об'ємну скінченно-елементну сітку. Виконано ущільнення в зонах концентрації напружень (з'єднання кришок з корпусом, місця кріплення опор).
+
+  \item \textbf{Задання граничних умов (Setup).}
+    \begin{itemize}
+      \item Fixed Support --- на нижніх поверхнях опор;
+      \item Internal Pressure --- 1{,}1~МПа на внутрішні поверхні ємності;
+      \item Thermal Condition --- 75~°C;
+      \item Standard Earth Gravity --- увімкнено.
+    \end{itemize}
+
+  \item \textbf{Розрахунок (Solve).}
+    Запущено розрахунок. Перевірено збіжність.
+
+  \item \textbf{Аналіз результатів (Results).}
+    Побудовано епюри Total Deformation та Equivalent Stress з активованим маркером Maximum.
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Візуалізація моделі}
+% ═══════════════════════════════════════════════════════════════════
+
+\placeholder{Геометрія ємності з опорами (3D-вид)}
+
+\placeholder{Розрахункова сітка (Mesh)}
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Результати розрахунку}
+% ═══════════════════════════════════════════════════════════════════
+
+\subsection{Total Deformation}
+
+\placeholder{Епюра сумарних деформацій (Deformation Total) з маркером Maximum}
+
+Максимальне значення Total Deformation становить \result{X{,}XX~мм} і спостерігається в \result{описати зону}.
+
+\subsection{Equivalent Stress}
+
+\placeholder{Епюра еквівалентних напружень (Equivalent Stress) з маркером Maximum}
+
+Максимальне значення Equivalent Stress (von~Mises) становить \result{X{,}XX~МПа} і локалізоване в \result{описати зону}.
+
+% ═══════════════════════════════════════════════════════════════════
+\section{Аналіз та висновок}
+% ═══════════════════════════════════════════════════════════════════
+
+Для оцінки міцності порівнюємо максимальне еквівалентне напруження з межею текучості матеріалу Stainless Steel:
+\[
+  \sigma_{\mathrm{eq,max}} = \result{X{,}XX}~\text{МПа}
+  \quad\text{vs}\quad
+  \sigma_{\mathrm{yield}} = 207~\text{МПа}.
+\]
+
+Запас міцності:
+\[
+  n = \frac{\sigma_{\mathrm{yield}}}{\sigma_{\mathrm{eq,max}}}
+    = \frac{207}{\result{X{,}XX}}
+    = \result{X{,}XX}.
+\]
+
+\result{Висновок: конструкція витримує / не витримує задані навантаження. Обґрунтування.}
+
+\end{document}
