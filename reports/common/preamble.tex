@@ -1,0 +1,62 @@
+% Common preamble for all lab reports
+\documentclass[a4paper, 12pt]{article}
+
+% Language and encoding
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[ukrainian]{babel}
+
+% Typography
+\usepackage{microtype}
+\usepackage{lmodern}
+
+% Page geometry
+\usepackage[margin=25mm, headheight=14pt]{geometry}
+
+% Math
+\usepackage{amsmath, amssymb}
+
+% Graphics and figures
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage[justification=centering]{caption}
+
+% Tables
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{array}
+
+% Colors and hyperlinks
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black, citecolor=blue!60!black]{hyperref}
+
+% Lists
+\usepackage{enumitem}
+\setlist{nosep, leftmargin=*}
+
+% Section formatting
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+
+% Header/footer
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\leftmark}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% Placeholder image command
+\newcommand{\placeholder}[2][0.8\textwidth]{%
+  \begin{figure}[H]
+    \centering
+    \fbox{\parbox{#1}{\vspace{4cm}\centering\textit{#2}\vspace{4cm}}}
+    \caption{#2}
+  \end{figure}
+}
+
+% Placeholder for inline result values
+\newcommand{\result}[1]{\textbf{\textcolor{red!70!black}{[#1]}}}

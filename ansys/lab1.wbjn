@@ -1,0 +1,180 @@
+# ANSYS Workbench 2024 R1 Journal — Lab 1: Static Structural (Variant 13)
+# Run: runwb2 -b -R ansys/lab1.wbjn
+
+import os
+import json
+
+# ── Paths ──────────────────────────────────────────────────────────
+script_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(script_dir)
+step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
+project_dir = os.path.join(script_dir, "projects", "lab1")
+results_dir = os.path.join(root_dir, "results", "lab1")
+
+for d in [project_dir, results_dir]:
+    if not os.path.exists(d):
+        os.makedirs(d)
+
+# ── Create Static Structural system ───────────────────────────────
+template = GetTemplate(TemplateName="Static Structural", Solver="ANSYS")
+system = template.CreateSystem()
+
+# Save project
+proj_path = os.path.join(project_dir, "lab1.wbpj")
+Save(FilePath=proj_path, Overwrite=True)
+
+# ── Engineering Data: Stainless Steel ─────────────────────────────
+eng_data = system.GetContainer(ComponentName="Engineering Data")
+mat_ss = eng_data.ImportMaterial(
+    Name="Stainless Steel",
+    Source="General_Materials.xml"
+)
+
+# ── Geometry Import ───────────────────────────────────────────────
+geometry = system.GetContainer(ComponentName="Geometry")
+geometry.SetFile(FilePath=step_file)
+# Edit geometry to ensure single body import
+geometry_props = system.GetComponent(Name="Geometry")
+geometry_props.Refresh()
+
+# Update project
+system.Update()
+
+# ── Model Setup (Mechanical) ─────────────────────────────────────
+model = system.GetContainer(ComponentName="Model")
+model.Edit()
+
+import Ansys.Mechanical.DataModel.Enums as MechEnums
+
+# Access the model tree
+analysis = Model.Analyses[0]
+geometry_obj = Model.Geometry
+
+# Assign material to all bodies
+for body in geometry_obj.GetChildren(
+    MechEnums.DataModelObjectCategory.Body, True
+):
+    body.Material = "Stainless Steel"
+
+# ── Mesh Settings ─────────────────────────────────────────────────
+mesh = Model.Mesh
+mesh.ElementSize = Quantity("10 mm")
+mesh.GenerateMesh()
+
+# Add mesh refinement at contacts / junctions
+mesh_refine = mesh.AddRefinement()
+mesh_refine.RefinementLevel = 2
+
+# Export mesh image
+mesh.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(
+        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
+    ),
+)
+
+# ── Boundary Conditions ──────────────────────────────────────────
+
+# 1. Fixed Support on bottom faces of legs
+fixed = analysis.AddFixedSupport()
+# Select bottom faces of legs (lowest Z faces)
+all_faces = []
+for body in geometry_obj.GetChildren(
+    MechEnums.DataModelObjectCategory.Body, True
+):
+    for face in body.GetChildren(
+        MechEnums.DataModelObjectCategory.GeoFace, True
+    ):
+        all_faces.append(face)
+
+# Find the lowest Z faces (support leg bottoms)
+min_z = min(f.Centroid.Z for f in all_faces)
+bottom_faces = [f for f in all_faces if abs(f.Centroid.Z - min_z) < 5]
+fixed.Location = ExtAPI.SelectionManager.CreateSelectionInfo(
+    MechEnums.SelectionTypeEnum.GeometryEntities
+)
+fixed.Location.Entities = bottom_faces
+
+# 2. Internal Pressure: 1.1 MPa on all inner faces
+pressure = analysis.AddPressure()
+pressure.Magnitude = Quantity("1.1 MPa")
+# Select inner faces (faces with normals pointing inward)
+inner_faces = []
+for body in geometry_obj.GetChildren(
+    MechEnums.DataModelObjectCategory.Body, True
+):
+    for face in body.GetChildren(
+        MechEnums.DataModelObjectCategory.GeoFace, True
+    ):
+        # Inner faces: approximately — faces with centroid radius < R_IN
+        r = (face.Centroid.X**2 + face.Centroid.Y**2) ** 0.5
+        if r < 248.5:  # R_IN ≈ 247.9, with tolerance
+            inner_faces.append(face)
+pressure.Location = ExtAPI.SelectionManager.CreateSelectionInfo(
+    MechEnums.SelectionTypeEnum.GeometryEntities
+)
+pressure.Location.Entities = inner_faces
+
+# 3. Thermal Condition: 75 °C
+thermal = analysis.AddThermalCondition()
+thermal.Magnitude = Quantity("75 [C]")
+
+# 4. Standard Earth Gravity
+gravity = analysis.AddAcceleration()
+gravity.YComponent = Quantity("-9806.6 mm/s^2")
+
+# ── Solve ─────────────────────────────────────────────────────────
+analysis.Solve()
+
+# ── Results ───────────────────────────────────────────────────────
+
+# Total Deformation
+deformation = analysis.Solution.AddTotalDeformation()
+deformation.Evaluate()
+deformation.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "deformation.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(
+        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
+    ),
+)
+
+# Equivalent (von-Mises) Stress
+stress = analysis.Solution.AddEquivalentStress()
+stress.Evaluate()
+stress.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "stress.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(
+        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
+    ),
+)
+
+# Geometry overview
+geometry_obj.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "geometry.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(
+        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
+    ),
+)
+
+# ── Export CSV summary ────────────────────────────────────────────
+max_deformation = deformation.Maximum.Value
+max_stress = stress.Maximum.Value
+
+csv_path = os.path.join(results_dir, "summary.csv")
+with open(csv_path, "w") as f:
+    f.write("Parameter,Value,Unit\n")
+    f.write("Max Total Deformation,{:.6f},mm\n".format(max_deformation))
+    f.write("Max Equivalent Stress,{:.4f},MPa\n".format(max_stress))
+
+print("Lab 1 complete. Results in: " + results_dir)
+
+# Save and close
+Save(Overwrite=True)

@@ -1,0 +1,331 @@
+# ANSYS Workbench 2024 R1 Journal — Lab 2: CFX Steady-State (Variant 13)
+# Run: runwb2 -b -R ansys/lab2.wbjn
+
+import os
+
+# ── Paths ──────────────────────────────────────────────────────────
+script_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(script_dir)
+step_file = os.path.join(root_dir, "geometry", "step", "lab2.step")
+project_dir = os.path.join(script_dir, "projects", "lab2")
+results_dir = os.path.join(root_dir, "results", "lab2")
+
+for d in [project_dir, results_dir]:
+    if not os.path.exists(d):
+        os.makedirs(d)
+
+# ── Create CFX system ─────────────────────────────────────────────
+template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
+system = template.CreateSystem()
+
+proj_path = os.path.join(project_dir, "lab2.wbpj")
+Save(FilePath=proj_path, Overwrite=True)
+
+# ── Geometry Import ───────────────────────────────────────────────
+geometry = system.GetContainer(ComponentName="Geometry")
+geometry.SetFile(FilePath=step_file)
+system.GetComponent(Name="Geometry").Refresh()
+system.Update()
+
+# ── Mesh ──────────────────────────────────────────────────────────
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+
+# Mesh settings
+mesh = Model.Mesh
+mesh.ElementSize = Quantity("3 mm")
+mesh.InfationOption = 1  # Inflation on
+
+# Add inflation on all walls
+inflation = mesh.AddInflation()
+inflation.MaximumLayers = 5
+inflation.GrowthRate = 1.2
+inflation.FirstLayerHeight = Quantity("0.3 mm")
+
+# Refinement around cone zone (center of pipe)
+sizing = mesh.AddSizing()
+sizing.ElementSize = Quantity("1.5 mm")
+
+mesh.GenerateMesh()
+
+# Export mesh image
+mesh.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# ── Named Selections ─────────────────────────────────────────────
+# Inlet: Z=0 face, Outlet: Z=300 face, Wall: everything else
+geo = Model.Geometry
+all_faces = []
+for body in geo.GetChildren(DataModelObjectCategory.Body, True):
+    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
+        all_faces.append(face)
+
+inlet_faces = [f for f in all_faces if abs(f.Centroid.Z) < 0.1]
+outlet_faces = [f for f in all_faces if abs(f.Centroid.Z - 300) < 0.1]
+wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_faces]
+
+ns_inlet = Model.AddNamedSelection()
+ns_inlet.Name = "Inlet"
+ns_inlet.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+ns_inlet.Location.Entities = inlet_faces
+
+ns_outlet = Model.AddNamedSelection()
+ns_outlet.Name = "Outlet"
+ns_outlet.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+ns_outlet.Location.Entities = outlet_faces
+
+ns_wall = Model.AddNamedSelection()
+ns_wall.Name = "Wall"
+ns_wall.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+ns_wall.Location.Entities = wall_faces
+
+# ── CFX-Pre Setup ────────────────────────────────────────────────
+# Access CFX-Pre via Workbench scripting
+setup = system.GetContainer(ComponentName="Setup")
+setup.Edit()
+
+# Write CFX command file (.ccl) for the simulation
+ccl_content = """
+FLOW: Flow Analysis 1
+  SOLUTION UNITS:
+    Angle Units = [rad]
+    Length Units = [mm]
+    Mass Units = [kg]
+    Solid Angle Units = [sr]
+    Temperature Units = [K]
+    Time Units = [s]
+  END
+  ANALYSIS TYPE:
+    Option = Steady State
+  END
+  DOMAIN: FluidDomain
+    Coord Frame = Coord 0
+    Domain Type = Fluid
+    Location = B1
+    DOMAIN MODELS:
+      BUOYANCY MODEL:
+        Option = Non Buoyant
+      END
+      DOMAIN MOTION:
+        Option = Stationary
+      END
+      MESH DEFORMATION:
+        Option = None
+      END
+      REFERENCE PRESSURE:
+        Reference Pressure = 1 [atm]
+      END
+    END
+    FLUID DEFINITION: Fluid 1
+      Material = Water
+      Option = Material Library
+      MORPHOLOGY:
+        Option = Continuous Fluid
+      END
+    END
+    FLUID MODELS:
+      HEAT TRANSFER MODEL:
+        Option = None
+      END
+      TURBULENCE MODEL:
+        Option = k-Epsilon
+      END
+      TURBULENT WALL FUNCTIONS:
+        Option = Scalable
+      END
+    END
+    BOUNDARY: Inlet
+      Boundary Type = INLET
+      Location = Inlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        MASS AND MOMENTUM:
+          Normal Speed = 1.3 [m s^-1]
+          Option = Normal Speed
+        END
+        TURBULENCE:
+          Option = Medium Intensity and Eddy Viscosity Ratio
+        END
+      END
+    END
+    BOUNDARY: Outlet
+      Boundary Type = OUTLET
+      Location = Outlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        MASS AND MOMENTUM:
+          Option = Average Static Pressure
+          Relative Pressure = 0 [Pa]
+        END
+        PRESSURE AVERAGING:
+          Option = Average Over Whole Outlet
+        END
+      END
+    END
+    BOUNDARY: Wall
+      Boundary Type = WALL
+      Location = Wall
+      BOUNDARY CONDITIONS:
+        WALL INFLUENCE ON FLOW:
+          Option = No Slip
+        END
+        WALL ROUGHNESS:
+          Option = Smooth Wall
+        END
+      END
+    END
+  END
+  SOLVER CONTROL:
+    Turbulence Numerics = High Resolution
+    ADVECTION SCHEME:
+      Option = High Resolution
+    END
+    CONVERGENCE CONTROL:
+      Maximum Number of Iterations = 300
+      Minimum Number of Iterations = 1
+    END
+    CONVERGENCE CRITERIA:
+      Residual Target = 1e-4
+      Residual Type = RMS
+    END
+  END
+  OUTPUT CONTROL:
+    RESULTS:
+      File Compression Level = Default
+      Option = Standard
+    END
+  END
+END
+"""
+
+ccl_path = os.path.join(project_dir, "lab2_setup.ccl")
+with open(ccl_path, "w") as f:
+    f.write(ccl_content)
+
+# Import CCL into CFX-Pre
+setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+
+# ── Solve ─────────────────────────────────────────────────────────
+solution = system.GetContainer(ComponentName="Solution")
+system.Update()
+
+# ── CFX-Post ──────────────────────────────────────────────────────
+results = system.GetContainer(ComponentName="Results")
+results.Edit()
+
+# Create mid-plane at Y=0
+post_commands = """
+# Create plane for contour plots
+PLANE: MidPlane
+  Option = YZ Plane
+  X = 0 [mm]
+END
+
+# Velocity contour
+CONTOUR: Velocity
+  Boundary List = MidPlane
+  Colour Variable = Velocity
+  Location = MidPlane
+  Range = Local
+END
+> export filename={results_dir}/velocity.png, type=png, width=1920, height=1080, onscreen=no
+
+# Pressure contour
+CONTOUR: Pressure
+  Boundary List = MidPlane
+  Colour Variable = Pressure
+  Location = MidPlane
+  Range = Local
+END
+> export filename={results_dir}/pressure.png, type=png, width=1920, height=1080, onscreen=no
+
+# Shear Strain Rate
+CONTOUR: SSR
+  Boundary List = MidPlane
+  Colour Variable = Shear Strain Rate
+  Location = MidPlane
+  Range = Local
+END
+> export filename={results_dir}/ssr.png, type=png, width=1920, height=1080, onscreen=no
+
+# Turbulence Kinetic Energy
+CONTOUR: TKE
+  Boundary List = MidPlane
+  Colour Variable = Turbulence Kinetic Energy
+  Location = MidPlane
+  Range = Local
+END
+> export filename={results_dir}/tke.png, type=png, width=1920, height=1080, onscreen=no
+
+# Turbulence Eddy Frequency
+CONTOUR: TEF
+  Boundary List = MidPlane
+  Colour Variable = Turbulence Eddy Frequency
+  Location = MidPlane
+  Range = Local
+END
+> export filename={results_dir}/tef.png, type=png, width=1920, height=1080, onscreen=no
+
+# Streamlines from inlet
+STREAMLINE: Streamlines
+  Boundary List = Inlet
+  Colour Variable = Velocity
+  Max Points = 500
+  Option = From Boundary
+END
+> export filename={results_dir}/streamline.png, type=png, width=1920, height=1080, onscreen=no
+
+# Vector plot
+VECTOR: Vectors
+  Boundary List = MidPlane
+  Location = MidPlane
+  Variable = Velocity
+END
+> export filename={results_dir}/vector.png, type=png, width=1920, height=1080, onscreen=no
+""".format(results_dir=results_dir.replace('\\', '/'))
+
+for line in post_commands.strip().split('\n'):
+    line = line.strip()
+    if line and not line.startswith('#'):
+        results.SendCommand(Command=line)
+
+# Function calculator: extract values
+calc_commands = """
+> calculate maxVal(Velocity), units=[m s^-1]
+> calculate areaAve(Velocity)@Inlet, units=[m s^-1]
+> calculate maxVal(Pressure), units=[Pa]
+> calculate areaAve(Pressure)@Inlet, units=[Pa]
+> calculate maxVal(Shear Strain Rate), units=[s^-1]
+> calculate maxVal(Turbulence Kinetic Energy), units=[m^2 s^-2]
+> calculate maxVal(Turbulence Eddy Frequency), units=[s^-1]
+"""
+
+csv_path = os.path.join(results_dir, "calc.csv")
+with open(csv_path, "w") as f:
+    f.write("Parameter,Value,Unit\n")
+
+for line in calc_commands.strip().split('\n'):
+    line = line.strip()
+    if line and not line.startswith('#'):
+        results.SendCommand(Command=line)
+
+# Geometry overview
+results.SendCommand(
+    Command='> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no'.format(
+        results_dir.replace('\\', '/')
+    )
+)
+
+print("Lab 2 complete. Results in: " + results_dir)
+Save(Overwrite=True)

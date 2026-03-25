@@ -1,0 +1,30 @@
+\ProvidesPackage{labstyle}[2025/03/25 v0.1 Title page for lab reports]
+
+% ── Metadata (only parts that change per lab) ────────────────────────
+\newcommand*{\labnum}[1]{\gdef\@labnum{#1}}
+\newcommand*{\@labnum}{0}
+\newcommand*{\labtitle}[1]{\gdef\@labtitle{#1}}
+\newcommand*{\@labtitle}{---}
+
+% ── Title page ───────────────────────────────────────────────────────
+\renewcommand*{\maketitle}{%
+  \begin{titlepage}
+    \centering
+    \vspace*{1cm}
+    {\large Національний технічний університет України\\
+      <<Київський політехнічний інститут імені Ігоря Сікорського>>}\\[12pt]
+    {\normalsize Кафедра біотехніки та інженерії}\\[24pt]
+    \rule{\textwidth}{0.4pt}\\[18pt]
+    {\LARGE\bfseries Практична робота №\@labnum}\\[12pt]
+    {\Large\itshape \@labtitle}\\[18pt]
+    \rule{\textwidth}{0.4pt}\\[24pt]
+    {\normalsize Дисципліна: <<Комп'ютерне проєктування технологічних
+      процесів в біотехнології та фармації>>}\\[36pt]
+    \begin{tabular}{@{}ll@{}}
+      Виконав: & Строганов~О.\,О. \\
+      Група:   & ББ-21 \\
+      Варіант: & 13 \\
+    \end{tabular}
+    \vfill
+    {\normalsize Київ~--- \the\year}
+  \end{titlepage}}

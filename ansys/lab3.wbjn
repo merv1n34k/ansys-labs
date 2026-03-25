@@ -1,0 +1,366 @@
+# ANSYS Workbench 2024 R1 Journal — Lab 3: CFX CHT Steady-State (Variant 13)
+# Run: runwb2 -b -R ansys/lab3.wbjn
+
+import os
+
+# ── Paths ──────────────────────────────────────────────────────────
+script_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(script_dir)
+step_file = os.path.join(root_dir, "geometry", "step", "lab3.step")
+project_dir = os.path.join(script_dir, "projects", "lab3")
+results_dir = os.path.join(root_dir, "results", "lab3")
+
+for d in [project_dir, results_dir]:
+    if not os.path.exists(d):
+        os.makedirs(d)
+
+# ── Create CFX system ─────────────────────────────────────────────
+template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
+system = template.CreateSystem()
+
+proj_path = os.path.join(project_dir, "lab3.wbpj")
+Save(FilePath=proj_path, Overwrite=True)
+
+# ── Geometry Import ───────────────────────────────────────────────
+geometry = system.GetContainer(ComponentName="Geometry")
+geometry.SetFile(FilePath=step_file)
+system.GetComponent(Name="Geometry").Refresh()
+system.Update()
+
+# ── Mesh ──────────────────────────────────────────────────────────
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+
+mesh = Model.Mesh
+mesh.ElementSize = Quantity("5 mm")
+mesh.GenerateMesh()
+
+mesh.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# ── Named Selections ─────────────────────────────────────────────
+# Named selections are created based on geometry body names from the STEP assembly.
+# The STEP file has 3 named bodies: vessel_fluid, coil_solid_copper, coil_fluid
+# Face-level named selections for BCs require geometric identification.
+
+# ── CFX-Pre Setup via CCL ────────────────────────────────────────
+setup = system.GetContainer(ComponentName="Setup")
+setup.Edit()
+
+ccl_content = """
+FLOW: Flow Analysis 1
+  SOLUTION UNITS:
+    Angle Units = [rad]
+    Length Units = [mm]
+    Mass Units = [kg]
+    Solid Angle Units = [sr]
+    Temperature Units = [K]
+    Time Units = [s]
+  END
+  ANALYSIS TYPE:
+    Option = Steady State
+  END
+
+  # --- Vessel Fluid Domain ---
+  DOMAIN: VesselFluid
+    Coord Frame = Coord 0
+    Domain Type = Fluid
+    Location = vessel_fluid
+    DOMAIN MODELS:
+      BUOYANCY MODEL:
+        Option = Non Buoyant
+      END
+      DOMAIN MOTION:
+        Option = Stationary
+      END
+      REFERENCE PRESSURE:
+        Reference Pressure = 1 [atm]
+      END
+    END
+    FLUID DEFINITION: Fluid 1
+      Material = Water
+      Option = Material Library
+      MORPHOLOGY:
+        Option = Continuous Fluid
+      END
+    END
+    FLUID MODELS:
+      HEAT TRANSFER MODEL:
+        Option = Total Energy
+      END
+      TURBULENCE MODEL:
+        Option = k-Epsilon
+      END
+      TURBULENT WALL FUNCTIONS:
+        Option = Scalable
+      END
+    END
+    BOUNDARY: Vessel_Inlet
+      Boundary Type = INLET
+      Location = Vessel_Inlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        HEAT TRANSFER:
+          Option = Static Temperature
+          Static Temperature = 285.15 [K]
+        END
+        MASS AND MOMENTUM:
+          Normal Speed = 0.006 [m s^-1]
+          Option = Normal Speed
+        END
+        TURBULENCE:
+          Option = Medium Intensity and Eddy Viscosity Ratio
+        END
+      END
+    END
+    BOUNDARY: Vessel_Outlet
+      Boundary Type = OUTLET
+      Location = Vessel_Outlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        MASS AND MOMENTUM:
+          Option = Average Static Pressure
+          Relative Pressure = 0 [Pa]
+        END
+      END
+    END
+    BOUNDARY: Vessel_Wall
+      Boundary Type = WALL
+      Location = Vessel_Wall
+      BOUNDARY CONDITIONS:
+        HEAT TRANSFER:
+          Option = Adiabatic
+        END
+        WALL INFLUENCE ON FLOW:
+          Option = No Slip
+        END
+      END
+    END
+  END
+
+  # --- Coil Solid Domain (Copper) ---
+  DOMAIN: CoilSolid
+    Coord Frame = Coord 0
+    Domain Type = Solid
+    Location = coil_solid_copper
+    SOLID DEFINITION: Solid 1
+      Material = Copper
+      Option = Material Library
+    END
+    SOLID MODELS:
+      HEAT TRANSFER MODEL:
+        Option = Thermal Energy
+      END
+    END
+  END
+
+  # --- Coil Fluid Domain ---
+  DOMAIN: CoilFluid
+    Coord Frame = Coord 0
+    Domain Type = Fluid
+    Location = coil_fluid
+    DOMAIN MODELS:
+      BUOYANCY MODEL:
+        Option = Non Buoyant
+      END
+      DOMAIN MOTION:
+        Option = Stationary
+      END
+      REFERENCE PRESSURE:
+        Reference Pressure = 1 [atm]
+      END
+    END
+    FLUID DEFINITION: Fluid 1
+      Material = Water
+      Option = Material Library
+      MORPHOLOGY:
+        Option = Continuous Fluid
+      END
+    END
+    FLUID MODELS:
+      HEAT TRANSFER MODEL:
+        Option = Total Energy
+      END
+      TURBULENCE MODEL:
+        Option = k-Epsilon
+      END
+      TURBULENT WALL FUNCTIONS:
+        Option = Scalable
+      END
+    END
+    BOUNDARY: Circuit_Inlet
+      Boundary Type = INLET
+      Location = Circuit_Inlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        HEAT TRANSFER:
+          Option = Static Temperature
+          Static Temperature = 381.15 [K]
+        END
+        MASS AND MOMENTUM:
+          Normal Speed = 1.4 [m s^-1]
+          Option = Normal Speed
+        END
+        TURBULENCE:
+          Option = Medium Intensity and Eddy Viscosity Ratio
+        END
+      END
+    END
+    BOUNDARY: Circuit_Outlet
+      Boundary Type = OUTLET
+      Location = Circuit_Outlet
+      BOUNDARY CONDITIONS:
+        FLOW REGIME:
+          Option = Subsonic
+        END
+        MASS AND MOMENTUM:
+          Option = Average Static Pressure
+          Relative Pressure = 0 [Pa]
+        END
+      END
+    END
+  END
+
+  # --- Domain Interfaces ---
+  DOMAIN INTERFACE: VesselFluid_CoilSolid
+    Boundary List1 = VesselFluid Side 1
+    Boundary List2 = CoilSolid Side 1
+    Interface Type = Fluid Solid
+    INTERFACE MODELS:
+      Option = General Connection
+      HEAT TRANSFER:
+        Option = Conservative Interface Flux
+      END
+    END
+  END
+  DOMAIN INTERFACE: CoilSolid_CoilFluid
+    Boundary List1 = CoilSolid Side 2
+    Boundary List2 = CoilFluid Side 1
+    Interface Type = Fluid Solid
+    INTERFACE MODELS:
+      Option = General Connection
+      HEAT TRANSFER:
+        Option = Conservative Interface Flux
+      END
+    END
+  END
+
+  SOLVER CONTROL:
+    Turbulence Numerics = High Resolution
+    ADVECTION SCHEME:
+      Option = High Resolution
+    END
+    CONVERGENCE CONTROL:
+      Maximum Number of Iterations = 500
+      Minimum Number of Iterations = 1
+    END
+    CONVERGENCE CRITERIA:
+      Residual Target = 1e-4
+      Residual Type = RMS
+    END
+  END
+  OUTPUT CONTROL:
+    RESULTS:
+      File Compression Level = Default
+      Option = Standard
+    END
+  END
+END
+"""
+
+ccl_path = os.path.join(project_dir, "lab3_setup.ccl")
+with open(ccl_path, "w") as f:
+    f.write(ccl_content)
+
+setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+
+# ── Solve ─────────────────────────────────────────────────────────
+system.Update()
+
+# ── CFX-Post ──────────────────────────────────────────────────────
+results = system.GetContainer(ComponentName="Results")
+results.Edit()
+
+post_commands = [
+    # Temperature contours
+    "PLANE: MidPlaneYZ",
+    "  Option = YZ Plane",
+    "  X = 0 [mm]",
+    "END",
+    "",
+    "CONTOUR: TempVessel",
+    "  Boundary List = MidPlaneYZ",
+    "  Colour Variable = Temperature",
+    "  Domain List = VesselFluid",
+    "  Location = MidPlaneYZ",
+    "  Range = Local",
+    "END",
+    "> export filename={}/temp_vessel.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
+    "",
+    "CONTOUR: TempCircuit",
+    "  Boundary List = MidPlaneYZ",
+    "  Colour Variable = Temperature",
+    "  Domain List = CoilFluid, CoilSolid",
+    "  Location = MidPlaneYZ",
+    "  Range = Local",
+    "END",
+    "> export filename={}/temp_circuit.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
+    "",
+    # Velocity contours
+    "CONTOUR: VelVessel",
+    "  Boundary List = MidPlaneYZ",
+    "  Colour Variable = Velocity",
+    "  Domain List = VesselFluid",
+    "  Location = MidPlaneYZ",
+    "  Range = Local",
+    "END",
+    "> export filename={}/vel_vessel.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
+    "",
+    "CONTOUR: VelCircuit",
+    "  Boundary List = MidPlaneYZ",
+    "  Colour Variable = Velocity",
+    "  Domain List = CoilFluid",
+    "  Location = MidPlaneYZ",
+    "  Range = Local",
+    "END",
+    "> export filename={}/vel_circuit.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
+    "",
+    # Geometry overview
+    "> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
+]
+
+for cmd in post_commands:
+    cmd = cmd.strip()
+    if cmd and not cmd.startswith('#'):
+        results.SendCommand(Command=cmd)
+
+# Extract values to CSV
+csv_path = os.path.join(results_dir, "values.csv")
+with open(csv_path, "w") as f:
+    f.write("Location,Temperature_K,Velocity_ms\n")
+
+calc_vars = [
+    ("Vessel_Inlet", "VesselFluid"),
+    ("Vessel_Outlet", "VesselFluid"),
+    ("Circuit_Inlet", "CoilFluid"),
+    ("Circuit_Outlet", "CoilFluid"),
+]
+for loc, domain in calc_vars:
+    results.SendCommand(Command='> calculate areaAve(Temperature)@{}, units=[K]'.format(loc))
+    results.SendCommand(Command='> calculate areaAve(Velocity)@{}, units=[m s^-1]'.format(loc))
+
+print("Lab 3 complete. Results in: " + results_dir)
+Save(Overwrite=True)
