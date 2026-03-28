@@ -4,12 +4,17 @@
 import os
 
 # -- Paths ----------------------------------------------------------
-# __file__ is unreliable in Workbench journals (copied to session dir).
-# Use CWD instead -- Makefile runs from repo root.
-root_dir = os.path.abspath(os.getcwd())
+# Workbench changes CWD and copies journal to session dir,
+# so neither __file__ nor os.getcwd() are reliable.
+# Use ANSYS_LABS_ROOT env var set by Makefile.
+root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
 step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab1")
 results_dir = os.path.join(root_dir, "results", "lab1")
+
+print("ROOT: " + root_dir)
+print("STEP: " + step_file)
+print("STEP exists: " + str(os.path.exists(step_file)))
 
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):

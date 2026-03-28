@@ -7,9 +7,7 @@
 import os
 
 # -- Paths ----------------------------------------------------------
-# __file__ is unreliable in Workbench journals (copied to session dir).
-# Use CWD instead -- Makefile runs from repo root.
-root_dir = os.path.abspath(os.getcwd())
+root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
 step_file = os.path.join(root_dir, "geometry", "step", "lab2.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab2")
 results_dir = os.path.join(root_dir, "results", "lab2")
