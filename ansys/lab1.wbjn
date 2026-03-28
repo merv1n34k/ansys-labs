@@ -1,192 +1,188 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
-# Run: runwb2 -b -R ansys/lab1.wbjn
+# Uses Mechanical APDL template for headless batch mode
+# Run: runwb2 -B -R ansys/lab1.wbjn
 
 import os
 
 # -- Paths ----------------------------------------------------------
-# Workbench changes CWD and copies journal to session dir,
-# so neither __file__ nor os.getcwd() are reliable.
-# Use ANSYS_LABS_ROOT env var set by Makefile.
 root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
-step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab1")
 results_dir = os.path.join(root_dir, "results", "lab1")
 
 print("ROOT: " + root_dir)
-print("STEP: " + step_file)
-print("STEP exists: " + str(os.path.exists(step_file)))
 
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# -- Create Static Structural system -------------------------------
-template = GetTemplate(TemplateName="Static Structural", Solver="ANSYS")
+# -- Write APDL input file -----------------------------------------
+rd = results_dir.replace('\\', '/')
+
+apdl_lines = [
+    "FINISH",
+    "/CLEAR,START",
+    "/PREP7",
+    "",
+    "! --- Vessel geometry (Variant 13) ---",
+    "! Cylindrical shell: OD=500, wall=2.1, H=1000",
+    "CYLIND,250,247.9,0,1000",
+    "",
+    "! Top flat lid: solid disk at Z=1000",
+    "CYLIND,250,,1000,1002.1",
+    "",
+    "! Bottom hemisphere shell: centered at Z=0, extends downward",
+    "SPHERE,250,247.9",
+    "BLOCK,-300,300,-300,300,0,300",
+    "VSBV,3,4",
+    "",
+    "! Merge coincident entities and combine vessel parts",
+    "NUMMRG,KP",
+    "VSEL,ALL",
+    "VADD,ALL",
+    "",
+    "! --- Support pads: 4 rectangular, 50x10x50 at mid-height ---",
+    "BLOCK,250,300,-5,5,475,525",
+    "BLOCK,-300,-250,-5,5,475,525",
+    "BLOCK,-5,5,250,300,475,525",
+    "BLOCK,-5,5,-300,-250,475,525",
+    "",
+    "! Glue pads to vessel (shared mesh at contact)",
+    "VGLUE,ALL",
+    "",
+    "! --- Material: Stainless Steel ---",
+    "ET,1,SOLID187",
+    "MP,EX,1,193e3",
+    "MP,PRXY,1,0.31",
+    "MP,DENS,1,7.75e-9",
+    "MP,ALPX,1,1.7e-5",
+    "",
+    "VSEL,ALL",
+    "VATT,1,,1",
+    "",
+    "! --- Mesh ---",
+    "ESIZE,10",
+    "VMESH,ALL",
+    "",
+    "! --- Boundary Conditions ---",
+    "",
+    "! Fixed support on outer pad faces (R > 295, mid-height)",
+    "LOCAL,11,1,0,0,0",
+    "CSYS,11",
+    "NSEL,S,LOC,X,295,400",
+    "NSEL,R,LOC,Z,400,600",
+    "CSYS,0",
+    "D,ALL,ALL",
+    "",
+    "! Internal pressure 1.1 MPa on inner vessel faces (R < 248.5)",
+    "NSEL,ALL",
+    "CSYS,11",
+    "ASEL,S,LOC,X,0,248.5",
+    "CSYS,0",
+    "SFA,ALL,,PRES,1.1",
+    "",
+    "! Thermal condition: 75 C (ref temp 22 C)",
+    "TREF,22",
+    "NSEL,ALL",
+    "BF,ALL,TEMP,75",
+    "",
+    "! Gravity: -Z direction",
+    "ACEL,0,0,9806.6",
+    "",
+    "NSEL,ALL",
+    "ASEL,ALL",
+    "ALLS",
+    "",
+    "! --- Solve ---",
+    "/SOLU",
+    "ANTYPE,0",
+    "SOLVE",
+    "FINISH",
+    "",
+    "! --- Post-processing ---",
+    "/POST1",
+    "SET,LAST",
+    "",
+    "! Max total deformation",
+    "NSORT,U,SUM,1",
+    "*GET,NMAX1,NODE,0,NXTH",
+    "*GET,out_max_def,NODE,NMAX1,U,SUM",
+    "",
+    "! Max equivalent stress",
+    "NSORT,S,EQV,1",
+    "*GET,NMAX2,NODE,0,NXTH",
+    "*GET,out_max_stress,NODE,NMAX2,S,EQV",
+    "",
+    "! --- Image export ---",
+    "/GRAPHICS,POWER",
+    "/SHOW,PNG,,0",
+    "/GFILE,1920",
+    "/VIEW,1,1,1,1",
+    "/DSCALE,1,AUTO",
+    "PLNSOL,U,SUM",
+    "/SHOW,CLOSE",
+    "",
+    "/SHOW,PNG,,0",
+    "/GFILE,1920",
+    "/VIEW,1,1,1,1",
+    "PLNSOL,S,EQV",
+    "/SHOW,CLOSE",
+    "",
+    "FINISH",
+]
+
+apdl_content = "\n".join(apdl_lines)
+dat_path = os.path.join(project_dir, "lab1.dat")
+with open(dat_path, "w") as f:
+    f.write(apdl_content)
+
+print("APDL input written to: " + dat_path)
+
+# -- Create Mechanical APDL system ---------------------------------
+template = GetTemplate(TemplateName="Mechanical APDL")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab1.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# -- Engineering Data: Stainless Steel -----------------------------
-eng_data = system.GetContainer(ComponentName="Engineering Data")
-mat_ss = eng_data.ImportMaterial(
-    Name="Stainless Steel",
-    Source="General_Materials.xml"
-)
+# -- Load input file and publish output parameters ------------------
+setup = system.GetContainer(ComponentName="Setup")
+inputFile = setup.AddInputFile(FilePath=dat_path)
 
-# -- Geometry Import -----------------------------------------------
-geometry = system.GetContainer(ComponentName="Geometry")
-geometry.SetFile(FilePath=step_file)
-geom_comp = system.GetComponent(Name="Geometry")
-geom_comp.Refresh()
-geom_comp.Update()
+inputFile.PublishMapdlParameter(Name="out_max_def", IsDirectOutput=True)
+inputFile.PublishMapdlParameter(Name="out_max_stress", IsDirectOutput=True)
 
-# -- Model Setup (Mechanical) -------------------------------------
-model = system.GetContainer(ComponentName="Model")
-model.Edit()
+# -- Solve ----------------------------------------------------------
+Update()
 
-analysis = Model.Analyses[0]
-geometry_obj = Model.Geometry
-
-# Assign material to all bodies
-for body in geometry_obj.GetChildren(
-    DataModelObjectCategory.Body, True
-):
-    body.Material = "Stainless Steel"
-
-# -- Identify Bodies ----------------------------------------------
-# Assembly has 2 bodies: vessel (larger) and pads (smaller)
-all_bodies = list(geometry_obj.GetChildren(
-    DataModelObjectCategory.Body, True
-))
-all_bodies.sort(key=lambda b: b.Volume, reverse=True)
-vessel_body = all_bodies[0]
-pads_body = all_bodies[1] if len(all_bodies) > 1 else None
-
-print("Bodies found: %d" % len(all_bodies))
-for b in all_bodies:
-    print("  %s: Volume=%.0f mm^3" % (b.Name, b.Volume))
-
-# -- Mesh Settings -------------------------------------------------
-mesh = Model.Mesh
-mesh.ElementSize = Quantity("10 mm")
-
-mesh_refine = mesh.AddRefinement()
-mesh_refine.RefinementLevel = 2
-
-mesh.GenerateMesh()
-
-mesh.Activate()
-Graphics.ExportImage(
-    os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(
-        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
-    ),
-)
-
-# -- Boundary Conditions ------------------------------------------
-
-# 1. Fixed Support on outer faces of support pads
-#    Pads are at mid-height (Z~500), extending radially from R_OUT(250) to R_OUT+50(300).
-#    Outer faces have centroid at max radius (~300 mm).
-fixed = analysis.AddFixedSupport()
-if pads_body is not None:
-    pad_faces = list(pads_body.GetChildren(
-        DataModelObjectCategory.GeoFace, True
-    ))
-    # Select faces with centroid radius > 295 mm (outer pad faces)
-    outer_pad_faces = []
-    for f in pad_faces:
-        r = (f.Centroid.X ** 2 + f.Centroid.Y ** 2) ** 0.5
-        if r > 295:
-            outer_pad_faces.append(f)
-    if outer_pad_faces:
-        sel = ExtAPI.SelectionManager.CreateSelectionInfo(
-            SelectionTypeEnum.GeometryEntities
-        )
-        sel.Entities = outer_pad_faces
-        fixed.Location = sel
-        print("Fixed support: %d pad outer faces" % len(outer_pad_faces))
-
-# 2. Internal Pressure: 1.1 MPa on inner vessel faces
-#    Inner faces: cylindrical surface at r~R_IN(247.9), hemisphere (r<R_IN),
-#    and top lid inner face (at Z=1000, r=0..R_IN).
-#    All are on the vessel body with centroid radius <= R_IN + tolerance.
-pressure = analysis.AddPressure()
-pressure.Magnitude = Quantity("1.1 MPa")
-vessel_faces = list(vessel_body.GetChildren(
-    DataModelObjectCategory.GeoFace, True
-))
-R_IN = 247.9  # from common.py: (500 - 2*2.1) / 2
-R_OUT = 250.0
-inner_faces = []
-for f in vessel_faces:
-    r = (f.Centroid.X ** 2 + f.Centroid.Y ** 2) ** 0.5
-    z = f.Centroid.Z
-    # Inner faces: centroid radius < R_IN + 1mm (inner cylinder, hemisphere, top lid)
-    # Exclude outer faces: centroid radius > (R_IN + R_OUT) / 2
-    if r < (R_IN + R_OUT) / 2.0:
-        inner_faces.append(f)
-sel = ExtAPI.SelectionManager.CreateSelectionInfo(
-    SelectionTypeEnum.GeometryEntities
-)
-sel.Entities = inner_faces
-pressure.Location = sel
-print("Pressure: %d inner faces" % len(inner_faces))
-
-# 3. Thermal Condition: 75 deg C
-thermal = analysis.AddThermalCondition()
-thermal.Magnitude = Quantity("75 [C]")
-
-# 4. Standard Earth Gravity (-Z direction, geometry is Z-up)
-gravity = analysis.AddAcceleration()
-gravity.ZComponent = Quantity("-9806.6 mm/s^2")
-
-# -- Solve ---------------------------------------------------------
-analysis.Solve()
-
-# -- Results -------------------------------------------------------
-deformation = analysis.Solution.AddTotalDeformation()
-deformation.Evaluate()
-deformation.Activate()
-Graphics.ExportImage(
-    os.path.join(results_dir, "deformation.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(
-        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
-    ),
-)
-
-stress = analysis.Solution.AddEquivalentStress()
-stress.Evaluate()
-stress.Activate()
-Graphics.ExportImage(
-    os.path.join(results_dir, "stress.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(
-        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
-    ),
-)
-
-geometry_obj.Activate()
-Graphics.ExportImage(
-    os.path.join(results_dir, "geometry.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(
-        Width=1920, Height=1080, Background=GraphicsBackgroundType.White
-    ),
-)
-
-# -- Export CSV summary --------------------------------------------
-max_deformation = deformation.Maximum.Value
-max_stress = stress.Maximum.Value
+# -- Read results and write CSV ------------------------------------
+p_def = Parameters.GetParameter(Name="P1")
+p_stress = Parameters.GetParameter(Name="P2")
 
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
     f.write("Parameter,Value,Unit\n")
-    f.write("Max Total Deformation,{:.6f},mm\n".format(max_deformation))
-    f.write("Max Equivalent Stress,{:.4f},MPa\n".format(max_stress))
+    f.write("Max Total Deformation,%s,mm\n" % p_def.Value)
+    f.write("Max Equivalent Stress,%s,MPa\n" % p_stress.Value)
+
+# -- Copy image files to results dir --------------------------------
+import glob
+import shutil
+
+# MAPDL creates file000.png, file001.png in its working directory
+project_base = os.path.splitext(proj_path)[0] + "_files"
+png_files = sorted(glob.glob(os.path.join(project_base, "**", "file*.png"), recursive=True))
+
+if len(png_files) >= 2:
+    shutil.copy2(png_files[0], os.path.join(results_dir, "deformation.png"))
+    shutil.copy2(png_files[1], os.path.join(results_dir, "stress.png"))
+    print("Images copied to results dir")
+elif len(png_files) >= 1:
+    shutil.copy2(png_files[0], os.path.join(results_dir, "deformation.png"))
+    print("Partial images copied")
+else:
+    print("No image files found (non-critical)")
 
 print("Lab 1 complete. Results in: " + results_dir)
+print("Max Deformation: %s mm" % p_def.Value)
+print("Max Stress: %s MPa" % p_stress.Value)
 Save(Overwrite=True)
