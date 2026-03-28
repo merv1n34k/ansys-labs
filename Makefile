@@ -13,7 +13,9 @@ REPORTS_DIR := reports
 LABS := lab1 lab2 lab3 lab4 lab5
 RUNWB2 ?= xvfb-run --auto-servernum ../ansys.sh wb
 export ANSYS_LABS_ROOT := $(CURDIR)
-export QT_QPA_PLATFORM ?= offscreen
+# Let Qt use the X display from xvfb-run (not offscreen which lacks OpenGL)
+export LIBGL_ALWAYS_SOFTWARE := 1
+unexport QT_QPA_PLATFORM
 
 # ── Standard targets ──────────────────────────────────────────────
 
