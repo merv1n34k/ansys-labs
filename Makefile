@@ -11,7 +11,7 @@ RESULTS_DIR := results
 REPORTS_DIR := reports
 
 LABS := lab1 lab2 lab3 lab4 lab5
-RUNWB2 ?= ansys.sh wb
+RUNWB2 ?= ../ansys.sh wb
 export ANSYS_LABS_ROOT := $(CURDIR)
 
 # ── Standard targets ──────────────────────────────────────────────
