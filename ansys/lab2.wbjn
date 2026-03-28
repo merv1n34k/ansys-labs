@@ -26,8 +26,9 @@ Save(FilePath=proj_path, Overwrite=True)
 # -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
-system.GetComponent(Name="Geometry").Refresh()
-system.Update()
+geom_comp = system.GetComponent(Name="Geometry")
+geom_comp.Refresh()
+geom_comp.Update()
 
 # -- Meshing: Named Selections + Mesh ------------------------------
 mesh_component = system.GetComponent(Name="Mesh")

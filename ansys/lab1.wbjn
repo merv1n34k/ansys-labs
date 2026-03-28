@@ -37,8 +37,9 @@ mat_ss = eng_data.ImportMaterial(
 # -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
-system.GetComponent(Name="Geometry").Refresh()
-system.Update()
+geom_comp = system.GetComponent(Name="Geometry")
+geom_comp.Refresh()
+geom_comp.Update()
 
 # -- Model Setup (Mechanical) -------------------------------------
 model = system.GetContainer(ComponentName="Model")
