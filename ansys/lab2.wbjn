@@ -7,10 +7,11 @@
 import os
 
 # -- Paths ----------------------------------------------------------
-script_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(script_dir)
+# __file__ is unreliable in Workbench journals (copied to session dir).
+# Use CWD instead -- Makefile runs from repo root.
+root_dir = os.path.abspath(os.getcwd())
 step_file = os.path.join(root_dir, "geometry", "step", "lab2.step")
-project_dir = os.path.join(script_dir, "projects", "lab2")
+project_dir = os.path.join(root_dir, "ansys", "projects", "lab2")
 results_dir = os.path.join(root_dir, "results", "lab2")
 
 for d in [project_dir, results_dir]:
