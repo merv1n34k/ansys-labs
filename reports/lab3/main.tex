@@ -9,9 +9,9 @@
 \tableofcontents
 \newpage
 
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Вихідні дані}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \begin{table}[H]
   \centering
@@ -23,11 +23,11 @@
     Верхня кришка                              & Плоска \\
     Нижня кришка                               & Сферична \\
     Товщина стінки ємності                     & 2{,}1~мм \\
-    Температура гарячої рідини в контурі       & 108~°C \\
-    Температура холодної рідини в ємності      & 12~°C \\
+    Температура гарячого контуру               & 108\textdegree C (381{,}15~K) \\
+    Температура холодної рідини                & 12\textdegree C (285{,}15~K) \\
     Швидкість потоку в контурі                 & 1{,}4~м/с \\
     Швидкість потоку в ємності                 & 0{,}006~м/с \\
-    Початковий тиск (усі домени)               & 1~атм \\
+    Початковий тиск                            & 1~атм \\
     Матеріал контуру (тверде тіло)             & Copper \\
     Рідина                                     & Water \\
     Модель турбулентності                      & $k$-$\varepsilon$ \\
@@ -35,127 +35,88 @@
   \end{tabularx}
 \end{table}
 
-Геометрія ємності відповідає Практичній роботі~№1: вертикальний циліндр (зовнішня висота 1000~мм, зовнішній діаметр 500~мм), плоска верхня кришка, сферична нижня кришка.
+Геометрія ємності --- з Практичної роботи~\textnumero 1: циліндр ($H=1000$~мм, $D=500$~мм), плоска верхня кришка, сферична нижня кришка.
 
-% ═══════════════════════════════════════════════════════════════════
-\section{Теоретичні відомості}
-% ═══════════════════════════════════════════════════════════════════
+\subsection{Ключові формули}
 
-\subsection{Механізми теплообміну}
-
-\textbf{Теплопровідність (Conduction)} --- передача тепла через тверді тіла або нерухому рідину. Закон Фур'є:
-\begin{equation}
-  q = -\lambda\,\frac{\partial T}{\partial x},
-\end{equation}
-де $q$~--- тепловий потік (Вт/м$^2$), $\lambda$~--- коефіцієнт теплопровідності (Вт/(м$\cdot$К)).
-
-\textbf{Конвекція (Convection)} --- передача тепла рухомою рідиною. Закон Ньютона--Ріхмана:
-\begin{equation}
-  q = h\,(T_{\mathrm{wall}} - T_{\mathrm{fluid}}),
-\end{equation}
-де $h$~--- коефіцієнт тепловіддачі (Вт/(м$^2\cdot$К)).
-
-\textbf{Випромінювання (Radiation)} --- передача тепла електромагнітними хвилями. Закон Стефана--Больцмана:
-\begin{equation}
-  q = \varepsilon\,\sigma\,T^4,
-  \quad \sigma = 5{,}67 \times 10^{-8}~\text{Вт/(м$^2\cdot$К$^4$)}.
-\end{equation}
-
-\subsection{Рівняння енергії}
-
-Для рідини з конвекцією:
-\begin{equation}
-  \rho\, c_p\left(\frac{\partial T}{\partial t}
-  + \mathbf{U}\cdot\nabla T\right)
-  = \nabla\cdot(\lambda\,\nabla T) + S_E.
-\end{equation}
-
-Для твердого тіла (без конвекції):
-\begin{equation}
-  \rho\, c_p\,\frac{\partial T}{\partial t}
-  = \nabla\cdot(\lambda\,\nabla T) + S_E.
-\end{equation}
-
-\subsection{Безрозмірні критерії}
-
-Число Нуссельта (Nusselt number):
-\begin{equation}
-  \mathrm{Nu} = \frac{h\,D}{\lambda}.
-\end{equation}
-
-Число Прандтля (Prandtl number):
-\begin{equation}
-  \mathrm{Pr} = \frac{\mu\, c_p}{\lambda} = \frac{\nu}{a}.
-\end{equation}
-
-\subsection{Conjugate Heat Transfer (CHT)}
-
-Спряжений теплообмін передбачає одночасне моделювання теплообміну в рідині (конвекція + теплопровідність) та в твердому тілі (теплопровідність). На інтерфейсі Fluid--Solid забезпечується безперервність:
+Закон Фур'є: $q = -\lambda\,\partial T / \partial x$.
+Рівняння енергії: $\rho c_p(\partial T/\partial t + \mathbf{U}\cdot\nabla T) = \nabla\cdot(\lambda\nabla T) + S_E$.
+Умова спряження (CHT) на інтерфейсі Fluid--Solid:
 \begin{equation}
   T_{\mathrm{solid}}\big|_{\mathrm{int}} = T_{\mathrm{fluid}}\big|_{\mathrm{int}},
   \qquad
   q_{\mathrm{solid}}\big|_{\mathrm{int}} = q_{\mathrm{fluid}}\big|_{\mathrm{int}}.
 \end{equation}
 
-% ═══════════════════════════════════════════════════════════════════
-\section{Хронологічна послідовність виконання}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
+\section{Послідовність виконання}
+% ===================================================================
 
-\begin{enumerate}
-  \item \textbf{Підготовка геометрії.}
-    Використано модель ємності з Практичної роботи~№1. Створено внутрішній об'єм ємності як рідинний домен. Інтегровано трубчастий контур (змійовик / пряма труба) з входом та виходом. Геометрія складається з трьох окремих тіл:
-    \begin{itemize}
-      \item Внутрішній об'єм ємності (Fluid --- Water);
-      \item Тіло контуру (Solid --- Copper);
-      \item Внутрішній об'єм контуру (Fluid --- Water).
-    \end{itemize}
+Робота виконана через ANSYS Workbench Journaling (\texttt{lab3.wbjn}) з солвером CFX.
 
-  \item \textbf{Побудова сітки (Meshing).}
-    Побудовано об'ємну сітку з ущільненням у зонах контактів (Fluid--Solid interfaces).
+\begin{lstlisting}[style=scheme]
+1. CreateSystem("Fluid Flow (CFX)")
+2. Import lab3.step (3 bodies: vessel_fluid,
+   coil_solid_copper, coil_fluid)
+3. Enter Meshing
+   |-- ID bodies by volume: vessel > coil_solid > coil_fluid
+   |-- Print body names (verify match CCL Location refs)
+   |-- Nozzle detection: face at max X (~310),
+   |   near target Z, small area
+   |-- NS "Vessel_Inlet"   -> vessel face at Z~950, X~310
+   |-- NS "Vessel_Outlet"  -> vessel face at Z~50,  X~310
+   |-- NS "Vessel_Wall"    -> remaining vessel faces
+   |-- NS "Circuit_Inlet"  -> coil_fluid face Z~183, X~310
+   |-- NS "Circuit_Outlet" -> coil_fluid face Z~817, X~310
+   |-- Inflation -> scoped to Vessel_Wall, 3 layers,
+   |               h1=0.5mm
+   |-- Mesh 5mm -> mesh.png
+4. Enter CFX-Pre
+   |-- Import CCL (domains only, NO explicit interfaces):
+   |   VesselFluid: Location=vessel_fluid, Water,
+   |     Total Energy, k-eps
+   |     Inlet: 285K (12C), 0.006 m/s
+   |     Outlet: 0Pa | Wall: Adiabatic
+   |   CoilSolid: Location=coil_solid_copper,
+   |     Copper, Thermal Energy
+   |   CoilFluid: Location=coil_fluid, Water,
+   |     Total Energy, k-eps
+   |     Inlet: 381K (108C), 1.4 m/s | Outlet: 0Pa
+   |   Solver: High Res, 500 iter, RMS 1e-4
+   |-- > autoconnect  (auto-detect Fluid-Solid interfaces)
+5. Solve
+6. Enter CFX-Post
+   |-- Plane: XZ at Y=0
+   |-- Export: temp_vessel, temp_circuit,
+   |           vel_vessel, vel_circuit
+   |-- areaAve(T) and areaAve(V) at all 4 boundaries
+   '-- geometry.png
+\end{lstlisting}
 
-  \item \textbf{Налаштування доменів (CFX-Pre).}
-    \begin{itemize}
-      \item Fluid Domain (ємність): Water, $T = 12$~°C, Inlet $V = 0{,}006$~м/с;
-      \item Solid Domain (контур): Copper;
-      \item Fluid Domain (контур): Water, $T = 108$~°C, Inlet $V = 1{,}4$~м/с;
-      \item Reference Pressure: 1~атм;
-      \item Turbulence model: $k$-$\varepsilon$;
-      \item Heat Transfer model: Total Energy.
-    \end{itemize}
+\subsection{Геометрія (CadQuery $\to$ STEP)}
 
-  \item \textbf{Інтерфейси.}
-    Створено Fluid--Solid interfaces між рідинними та твердим доменами.
+Скрипт \texttt{geometry/lab3.py} будує збірку з трьох тіл: \textbf{vessel\_fluid} (внутрішній об'єм ємності), \textbf{coil\_solid\_copper} (тіло змійовика, Copper), \textbf{coil\_fluid} (внутрішній об'єм змійовика). Змійовик: спіральна труба, 7 витків, з радіальними патрубками на $Y=0$, $X \approx 310$~мм.
 
-  \item \textbf{Розрахунок та аналіз.}
-    Запущено стаціонарний розрахунок. Перевірено збіжність.
-\end{enumerate}
+\placeholder{Геометрія ємності з інтегрованим змійовиком}
 
-% ═══════════════════════════════════════════════════════════════════
-\section{Візуалізація моделі}
-% ═══════════════════════════════════════════════════════════════════
+\placeholder{Розрахункова сітка (Mesh)}
 
-\placeholder{Геометрія ємності з інтегрованим трубчастим контуром}
-
-\placeholder{Розрахункова сітка (Mesh) з ущільненням у зонах контактів}
-
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Результати розрахунку}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \subsection{Temperature}
 
-\placeholder{Contour: розподіл температури (Temperature) --- домен ємності}
+\placeholder{Contour: розподіл температури --- домен ємності}
 
-\placeholder{Contour: розподіл температури (Temperature) --- домен контуру}
-
-Чисельні значення температури на входах та виходах:
+\placeholder{Contour: розподіл температури --- домен контуру}
 
 \begin{table}[H]
   \centering
-  \caption{Температура на входах та виходах доменів}
+  \caption{Температура на входах та виходах}
   \begin{tabularx}{0.75\textwidth}{Xrr}
     \toprule
-    \textbf{Домен / Границя} & \textbf{Вхід, °C} & \textbf{Вихід, °C} \\
+    \textbf{Домен / Границя} & \textbf{Вхід, \textdegree C} & \textbf{Вихід, \textdegree C} \\
     \midrule
     Контур (гарячий)  & 108        & \result{---} \\
     Ємність (холодний) & 12        & \result{---} \\
@@ -165,15 +126,13 @@
 
 \subsection{Velocity}
 
-\placeholder{Contour: розподіл швидкості (Velocity) --- домен ємності}
+\placeholder{Contour: розподіл швидкості --- домен ємності}
 
-\placeholder{Contour: розподіл швидкості (Velocity) --- домен контуру}
-
-Чисельні значення швидкості:
+\placeholder{Contour: розподіл швидкості --- домен контуру}
 
 \begin{table}[H]
   \centering
-  \caption{Швидкість на входах та виходах доменів}
+  \caption{Швидкість на входах та виходах}
   \begin{tabularx}{0.75\textwidth}{Xrr}
     \toprule
     \textbf{Домен / Границя} & \textbf{Вхід, м/с} & \textbf{Вихід, м/с} \\
@@ -184,15 +143,15 @@
   \end{tabularx}
 \end{table}
 
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Аналіз та висновок}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \result{Опис результатів:
 \begin{itemize}
   \item Розподіл температурного поля --- зони нагріву, градієнти;
-  \item Ефективність теплообміну --- зміна температури рідини на виході порівняно з входом;
-  \item Оцінка фізичної реалістичності: чи відбувається передача тепла від гарячого контуру до холодної рідини без надмірних градієнтів;
+  \item Ефективність теплообміну --- зміна температури на виході;
+  \item Оцінка фізичної реалістичності;
   \item Висновок про ефективність конструкції теплообмінника.
 \end{itemize}}
 

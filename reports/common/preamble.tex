@@ -49,6 +49,25 @@
 \renewcommand{\headrulewidth}{0.4pt}
 \fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
 
+% Code listings for execution schemes
+\usepackage{listings}
+\lstdefinestyle{scheme}{
+  basicstyle=\small\ttfamily,
+  backgroundcolor=\color{black!4},
+  frame=single,
+  rulecolor=\color{black!20},
+  framesep=6pt,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  aboveskip=1em,
+  belowskip=1em,
+  literate={->}{{$\to$}}1,
+}
+
 % Placeholder image command
 \newcommand{\placeholder}[2][0.8\textwidth]{%
   \begin{figure}[H]

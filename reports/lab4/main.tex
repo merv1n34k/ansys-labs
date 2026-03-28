@@ -9,9 +9,9 @@
 \tableofcontents
 \newpage
 
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Вихідні дані}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \begin{table}[H]
   \centering
@@ -29,141 +29,72 @@
   \end{tabularx}
 \end{table}
 
-% ═══════════════════════════════════════════════════════════════════
-\section{Теоретичні відомості}
-% ═══════════════════════════════════════════════════════════════════
-
-\subsection{Ультразвукові хвилі}
-
-Ультразвук~--- звукові хвилі з частотою вище за поріг чутності людського вуха ($> 20$~кГц). Поширення ультразвуку описується хвильовим рівнянням (wave equation):
-\begin{equation}
-  \frac{\partial^2 p}{\partial t^2} = c^2\,\nabla^2 p,
-\end{equation}
-де $p$~--- акустичний тиск (Па), $c$~--- швидкість звуку в середовищі (м/с).
-
 \subsection{Параметри хвилі}
 
 Довжина хвилі:
+$\lambda = c/f = 1480/23000 \approx 64{,}3$~мм.
+
+Розмір елемента сітки: $h_{\max} \leq \lambda/10 \approx 6{,}4$~мм.
+
+Часовий крок: $\Delta t \leq 1/(20f) \approx 2{,}17 \times 10^{-6}$~с.
+
+Гармонічний рух випромінювача:
 \begin{equation}
-  \lambda = \frac{c}{f}.
+  z(t) = A\,\sin(2\pi f\, t) = 1{,}3 \times 10^{-3}\,\sin(2\pi \times 23000 \times t)~\text{[мм]}.
 \end{equation}
 
-Для води при $c = 1480$~м/с та $f = 23$~кГц:
-\[
-  \lambda = \frac{1480}{23000} \approx 64{,}3~\text{мм}.
-\]
+% ===================================================================
+\section{Послідовність виконання}
+% ===================================================================
 
-Акустичний імпеданс:
-\begin{equation}
-  Z = \rho\, c.
-\end{equation}
+Робота виконана через ANSYS Workbench Journaling (\texttt{lab4.wbjn}) з солвером CFX.
 
-Інтенсивність ультразвуку:
-\begin{equation}
-  I = \frac{p^2}{2\,\rho\, c}.
-\end{equation}
+\begin{lstlisting}[style=scheme]
+1. CreateSystem("Fluid Flow (CFX)")
+2. Import lab4.step (1 body: stadium bath with recess)
+3. Enter Meshing
+   |-- Print face centroids (diagnostic)
+   |-- NS "Emitter" -> face at Z~5mm, centroid at origin,
+   |                    area ~ 1257mm^2
+   |-- NS "Walls"   -> everything else
+   |-- Mesh 3mm (lambda/10=6.4mm, we use lambda/21)
+   |   -> mesh.png
+4. Enter CFX-Pre
+   |-- Import CCL with LIBRARY section:
+   |   MATERIAL CompressibleWater:
+   |     EOS = Linear Elastic, c=1480 m/s, rho=998.2 kg/m^3
+   |   EXPRESSIONS:
+   |     freq=23kHz, amp=1.3um, disp_z=amp*sin(2*pi*f*t)
+   |   FluidDomain: CompressibleWater (General Material),
+   |     Laminar
+   |     Mesh Deformation = Regions of Motion Specified
+   |     Emitter: Specified Displacement Z=disp_z
+   |     Walls: Stationary, No Slip
+   |   Transient: dt=2.17us, T=0.01s (~4600 steps)
+   |   Output: P,V every 10 steps -> 460 frames
+   |   Parallel: -part 12
+5. Solve
+6. Enter CFX-Post
+   |-- Plane: XZ at Y=0
+   |-- Export: pressure, velocity, geometry
+   '-- Export 50 key frames -> ffmpeg -> animation.mp4
+\end{lstlisting}
 
-Загасання:
-\begin{equation}
-  p(x) = p_0\, e^{-\alpha x},
-\end{equation}
-де $\alpha$~--- коефіцієнт загасання.
+\subsection{Геометрія (CadQuery $\to$ STEP)}
 
-\subsection{Швидкість звуку в різних середовищах}
+Скрипт \texttt{geometry/lab4.py}: ванночка (stadium/капсула) з виглибком на днищі (глибина 5~мм, $D=40$~мм) --- поверхня випромінювача. Одне рідинне тіло, об'єм $\leq 5$~л.
 
-\begin{table}[H]
-  \centering
-  \caption{Швидкість звуку}
-  \begin{tabularx}{0.55\textwidth}{Xr}
-    \toprule
-    \textbf{Середовище} & \textbf{$c$, м/с} \\
-    \midrule
-    Повітря (20\,°C) & 343 \\
-    Вода (20\,°C)    & 1482 \\
-    М'які тканини    & 1540 \\
-    Кістка           & 3500--4000 \\
-    Сталь            & 5900 \\
-    \bottomrule
-  \end{tabularx}
-\end{table}
+\subsection{Матеріал: CompressibleWater}
 
-\subsection{Вимоги до сітки та часового кроку}
+\textbf{Критично}: бібліотечна Water --- нестислива, не поширює звукові хвилі. Створюється власний матеріал з Linear Elastic EOS: $c = 1480$~м/с, $\rho = 998{,}2$~кг/м$^3$.
 
-Для коректного розв'язання хвильового процесу необхідно:
-
-Розмір елемента сітки:
-\begin{equation}
-  h_{\max} \leq \frac{\lambda}{10} = \frac{c}{10\,f}
-  = \frac{1480}{10 \times 23000} \approx 6{,}4~\text{мм}.
-\end{equation}
-
-Часовий крок (мінімум 20 кроків на період):
-\begin{equation}
-  \Delta t \leq \frac{1}{20\,f}
-  = \frac{1}{20 \times 23000} \approx 2{,}17 \times 10^{-6}~\text{с}.
-\end{equation}
-
-Число Куранта (CFL):
-\begin{equation}
-  \mathrm{CFL} = \frac{c\,\Delta t}{h} \leq 1.
-\end{equation}
-
-\subsection{Гармонічний рух випромінювача}
-
-Переміщення пластини задається Expression:
-\begin{equation}
-  y(t) = A\,\sin(2\pi f\, t) = 1{,}3 \times 10^{-6}\,\sin(2\pi \times 23000 \times t).
-\end{equation}
-
-% ═══════════════════════════════════════════════════════════════════
-\section{Хронологічна послідовність виконання}
-% ═══════════════════════════════════════════════════════════════════
-
-\begin{enumerate}
-  \item \textbf{Створення геометрії.}
-    Спроектовано компактну ультразвукову ванночку об'ємом до 5~л. Створено внутрішній об'єм рідини та випромінювальну пластину (на дні ванночки).
-
-  \item \textbf{Побудова сітки.}
-    Побудовано сітку з розміром елемента $\leq 6{,}4$~мм для розв'язання довжини хвилі ($\lambda \approx 64{,}3$~мм).
-
-  \item \textbf{Налаштування матеріалу.}
-    Створено власний матеріал CompressibleWater через Equation of State зі швидкістю звуку $c \approx 1480$~м/с.
-
-  \item \textbf{Створення Expressions.}
-    Задано вирази для гармонічного руху випромінювача:
-    \begin{itemize}
-      \item Frequency: $f = 23000$~Гц;
-      \item Amplitude: $A = 1{,}3 \times 10^{-6}$~м;
-      \item Displacement: $A \cdot \sin(2\pi f\, t)$.
-    \end{itemize}
-
-  \item \textbf{Граничні умови (CFX-Pre).}
-    \begin{itemize}
-      \item Випромінювач: Mesh Deformation $\to$ Specified Displacement;
-      \item Корпус ванночки: Stationary Wall;
-      \item Analysis Type: Transient;
-      \item Timestep: $\Delta t \leq 2{,}17 \times 10^{-6}$~с;
-      \item Total Time: \result{задати}.
-    \end{itemize}
-
-  \item \textbf{Розрахунок.}
-    Запущено Transient розрахунок у модулі Fluid Flow (CFX).
-
-  \item \textbf{Створення анімації.}
-    У CFX-Post створено анімацію (.mp4) динаміки поширення хвиль.
-\end{enumerate}
-
-% ═══════════════════════════════════════════════════════════════════
-\section{Візуалізація моделі}
-% ═══════════════════════════════════════════════════════════════════
-
-\placeholder{Геометрія ультразвукової ванночки з випромінювальною пластиною}
+\placeholder{Геометрія ультразвукової ванночки з випромінювачем}
 
 \placeholder{Розрахункова сітка (Mesh)}
 
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Результати розрахунку}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \subsection{Pressure}
 \placeholder{Contour: розподіл тиску (Pressure) у робочому об'ємі}
@@ -173,16 +104,16 @@
 
 \subsection{Анімація}
 
-Створено відеофайл (.mp4), що демонструє динаміку поширення ультразвукових хвиль. Відеофайл завантажено разом зі звітом.
+Створено відеофайл \texttt{animation.mp4}, що демонструє динаміку поширення ультразвукових хвиль.
 
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 \section{Аналіз та висновок}
-% ═══════════════════════════════════════════════════════════════════
+% ===================================================================
 
 \result{Опис:
 \begin{itemize}
-  \item Чи візуалізуються хвилі стиснення/розрідження (compression/rarefaction waves);
-  \item Фізична реалістичність результатів: відповідність довжини хвилі теоретичному значенню $\lambda \approx 64{,}3$~мм;
+  \item Чи візуалізуються хвилі стиснення/розрідження;
+  \item Відповідність довжини хвилі теоретичному значенню $\lambda \approx 64{,}3$~мм;
   \item Ефективність поширення коливань в об'ємі ванночки;
   \item Зони з максимальним та мінімальним тиском;
   \item Загальний висновок.
