@@ -37,7 +37,7 @@ mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
+model.Edit(Interactive=False)
 
 # Identify bodies by volume: vessel_fluid (large) vs mixer (small)
 all_bodies = list(Model.Geometry.GetChildren(

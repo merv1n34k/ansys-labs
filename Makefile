@@ -11,8 +11,9 @@ RESULTS_DIR := results
 REPORTS_DIR := reports
 
 LABS := lab1 lab2 lab3 lab4 lab5
-RUNWB2 ?= ../ansys.sh wb
+RUNWB2 ?= xvfb-run --auto-servernum ../ansys.sh wb
 export ANSYS_LABS_ROOT := $(CURDIR)
+export QT_QPA_PLATFORM ?= offscreen
 
 # ── Standard targets ──────────────────────────────────────────────
 

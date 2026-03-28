@@ -34,7 +34,7 @@ mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
+model.Edit(Interactive=False)
 
 # -- Named Selections (before meshing) -----------------------------
 # Pipe along X: inlet at X=0, outlet at X=300, wall = everything else.

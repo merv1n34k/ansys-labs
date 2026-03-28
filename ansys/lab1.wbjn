@@ -42,7 +42,7 @@ system.Update()
 
 # -- Model Setup (Mechanical) -------------------------------------
 model = system.GetContainer(ComponentName="Model")
-model.Edit()
+model.Edit(Interactive=False)
 
 import Ansys.Mechanical.DataModel.Enums as MechEnums
 
