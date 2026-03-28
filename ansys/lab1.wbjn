@@ -19,8 +19,32 @@ for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# -- Create Static Structural system --------------------------------
-template = GetTemplate(TemplateName="Static Structural")
+# -- Discover and create Static Structural system -------------------
+# List available templates for debugging
+all_templates = GetAllTemplates()
+print("Available templates:")
+for t in all_templates:
+    print("  '%s'" % t.Name)
+
+# Try known variants of the Static Structural template name
+template = None
+for name, solver in [("Static Structural", "ANSYS"),
+                     ("Static Structural", None),
+                     ("Static Structural (ANSYS)", None),
+                     ("Static Structural (Mechanical)", None)]:
+    try:
+        if solver:
+            template = GetTemplate(TemplateName=name, Solver=solver)
+        else:
+            template = GetTemplate(TemplateName=name)
+        print("Found template: '%s' (solver=%s)" % (name, solver))
+        break
+    except:
+        continue
+
+if template is None:
+    raise Exception("Could not find Static Structural template. Check available templates above.")
+
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab1.wbpj")
