@@ -45,21 +45,19 @@ geom_comp.Update()
 model = system.GetContainer(ComponentName="Model")
 model.Edit(Interactive=False)
 
-import Ansys.Mechanical.DataModel.Enums as MechEnums
-
 analysis = Model.Analyses[0]
 geometry_obj = Model.Geometry
 
 # Assign material to all bodies
 for body in geometry_obj.GetChildren(
-    MechEnums.DataModelObjectCategory.Body, True
+    DataModelObjectCategory.Body, True
 ):
     body.Material = "Stainless Steel"
 
 # -- Identify Bodies ----------------------------------------------
 # Assembly has 2 bodies: vessel (larger) and pads (smaller)
 all_bodies = list(geometry_obj.GetChildren(
-    MechEnums.DataModelObjectCategory.Body, True
+    DataModelObjectCategory.Body, True
 ))
 all_bodies.sort(key=lambda b: b.Volume, reverse=True)
 vessel_body = all_bodies[0]
@@ -95,7 +93,7 @@ Graphics.ExportImage(
 fixed = analysis.AddFixedSupport()
 if pads_body is not None:
     pad_faces = list(pads_body.GetChildren(
-        MechEnums.DataModelObjectCategory.GeoFace, True
+        DataModelObjectCategory.GeoFace, True
     ))
     # Select faces with centroid radius > 295 mm (outer pad faces)
     outer_pad_faces = []
@@ -105,7 +103,7 @@ if pads_body is not None:
             outer_pad_faces.append(f)
     if outer_pad_faces:
         sel = ExtAPI.SelectionManager.CreateSelectionInfo(
-            MechEnums.SelectionTypeEnum.GeometryEntities
+            SelectionTypeEnum.GeometryEntities
         )
         sel.Entities = outer_pad_faces
         fixed.Location = sel
@@ -118,7 +116,7 @@ if pads_body is not None:
 pressure = analysis.AddPressure()
 pressure.Magnitude = Quantity("1.1 MPa")
 vessel_faces = list(vessel_body.GetChildren(
-    MechEnums.DataModelObjectCategory.GeoFace, True
+    DataModelObjectCategory.GeoFace, True
 ))
 R_IN = 247.9  # from common.py: (500 - 2*2.1) / 2
 R_OUT = 250.0
@@ -131,7 +129,7 @@ for f in vessel_faces:
     if r < (R_IN + R_OUT) / 2.0:
         inner_faces.append(f)
 sel = ExtAPI.SelectionManager.CreateSelectionInfo(
-    MechEnums.SelectionTypeEnum.GeometryEntities
+    SelectionTypeEnum.GeometryEntities
 )
 sel.Entities = inner_faces
 pressure.Location = sel
