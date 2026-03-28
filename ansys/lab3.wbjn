@@ -1,5 +1,12 @@
 # ANSYS Workbench 2024 R1 Journal — Lab 3: CFX CHT Steady-State (Variant 13)
 # Run: runwb2 -b -R ansys/lab3.wbjn
+#
+# Geometry: 3-body STEP assembly (vessel_fluid, coil_solid_copper, coil_fluid).
+# All nozzle faces at Y=0, +X direction, X ~= 310 mm.
+# Vessel nozzles: Z=950 (inlet), Z=50 (outlet), R=20mm.
+# Coil nozzles: Z~=183 (inlet/bottom), Z~=817 (outlet/top).
+#
+# Domain interfaces are auto-detected by CFX-Pre from coincident mesh faces.
 
 import os
 
@@ -14,6 +21,18 @@ for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
+# ── Geometry constants (from lab3.py) for face detection ──────────
+NOZZLE_END_R = 310.0
+VESSEL_NZ_TOP = 950.0
+VESSEL_NZ_BOT = 50.0
+VESSEL_NZ_R = 20.0
+TUBE_OR = 12.5
+TUBE_IR = 10.5
+COIL_Z_OFFSET = 180.0
+COIL_HEIGHT = 640.0
+COIL_ARM_BOT_Z = COIL_Z_OFFSET + 3.3
+COIL_ARM_TOP_Z = COIL_Z_OFFSET + COIL_HEIGHT - 3.3
+
 # ── Create CFX system ─────────────────────────────────────────────
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
 system = template.CreateSystem()
@@ -27,15 +46,88 @@ geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Mesh ──────────────────────────────────────────────────────────
+# ── Meshing ───────────────────────────────────────────────────────
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
+# ── Identify Bodies by volume ────────────────────────────────────
+all_bodies = list(Model.Geometry.GetChildren(
+    DataModelObjectCategory.Body, True
+))
+all_bodies.sort(key=lambda b: b.Volume, reverse=True)
+print("Bodies: %d" % len(all_bodies))
+for b in all_bodies:
+    print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
+
+vessel_body = all_bodies[0]
+coil_solid_body = all_bodies[1]
+coil_fluid_body = all_bodies[2]
+
+# ── Helper functions ─────────────────────────────────────────────
+def get_faces(body):
+    return list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
+
+def find_nozzle_face(faces, target_z, max_area):
+    """Flat nozzle face near target Z at max X (nozzle end)."""
+    candidates = []
+    for f in faces:
+        if (f.Centroid.X > NOZZLE_END_R - 5
+                and abs(f.Centroid.Y) < 5
+                and abs(f.Centroid.Z - target_z) < 30
+                and f.Area < max_area):
+            candidates.append(f)
+    if candidates:
+        candidates.sort(key=lambda f: f.Centroid.X, reverse=True)
+        return [candidates[0]]
+    return []
+
+def make_ns(name, faces):
+    if not faces:
+        print("WARNING: no faces for '%s'" % name)
+        return
+    ns = Model.AddNamedSelection()
+    ns.Name = name
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = faces
+    ns.Location = sel
+    print("NS '%s': %d faces" % (name, len(faces)))
+
+# ── Named Selections ─────────────────────────────────────────────
+vessel_faces = get_faces(vessel_body)
+coil_inner_faces = get_faces(coil_fluid_body)
+
+vessel_nozzle_area = 3.14159 * VESSEL_NZ_R ** 2 * 2
+coil_nozzle_area = 3.14159 * TUBE_IR ** 2 * 2
+
+vi = find_nozzle_face(vessel_faces, VESSEL_NZ_TOP, vessel_nozzle_area)
+vo = find_nozzle_face(vessel_faces, VESSEL_NZ_BOT, vessel_nozzle_area)
+ci = find_nozzle_face(coil_inner_faces, COIL_ARM_BOT_Z, coil_nozzle_area)
+co = find_nozzle_face(coil_inner_faces, COIL_ARM_TOP_Z, coil_nozzle_area)
+
+make_ns("Vessel_Inlet", vi)
+make_ns("Vessel_Outlet", vo)
+make_ns("Vessel_Wall", [f for f in vessel_faces if f not in vi and f not in vo])
+make_ns("Circuit_Inlet", ci)
+make_ns("Circuit_Outlet", co)
+
+# ── Mesh Settings ─────────────────────────────────────────────────
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("5 mm")
+
+# Inflation on vessel wall for convection resolution
+vw = [f for f in vessel_faces if f not in vi and f not in vo]
+if vw:
+    inflation = mesh.AddInflation()
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = vw
+    inflation.Location = sel
+    inflation.MaximumLayers = 3
+    inflation.GrowthRate = 1.2
+    inflation.FirstLayerHeight = Quantity("0.5 mm")
+
 mesh.GenerateMesh()
 
 mesh.Activate()
@@ -45,15 +137,14 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── Named Selections ─────────────────────────────────────────────
-# Named selections are created based on geometry body names from the STEP assembly.
-# The STEP file has 3 named bodies: vessel_fluid, coil_solid_copper, coil_fluid
-# Face-level named selections for BCs require geometric identification.
-
-# ── CFX-Pre Setup via CCL ────────────────────────────────────────
+# ── CFX-Pre Setup ────────────────────────────────────────────────
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
+# CCL defines domains and boundaries only.
+# Domain interfaces are NOT specified — CFX-Pre auto-detects them
+# from coincident mesh faces between bodies (GGI with Conservative
+# Interface Flux for heat transfer, since all domains have HT enabled).
 ccl_content = """
 FLOW: Flow Analysis 1
   SOLUTION UNITS:
@@ -68,7 +159,6 @@ FLOW: Flow Analysis 1
     Option = Steady State
   END
 
-  # --- Vessel Fluid Domain ---
   DOMAIN: VesselFluid
     Coord Frame = Coord 0
     Domain Type = Fluid
@@ -149,7 +239,6 @@ FLOW: Flow Analysis 1
     END
   END
 
-  # --- Coil Solid Domain (Copper) ---
   DOMAIN: CoilSolid
     Coord Frame = Coord 0
     Domain Type = Solid
@@ -165,7 +254,6 @@ FLOW: Flow Analysis 1
     END
   END
 
-  # --- Coil Fluid Domain ---
   DOMAIN: CoilFluid
     Coord Frame = Coord 0
     Domain Type = Fluid
@@ -234,30 +322,6 @@ FLOW: Flow Analysis 1
     END
   END
 
-  # --- Domain Interfaces ---
-  DOMAIN INTERFACE: VesselFluid_CoilSolid
-    Boundary List1 = VesselFluid Side 1
-    Boundary List2 = CoilSolid Side 1
-    Interface Type = Fluid Solid
-    INTERFACE MODELS:
-      Option = General Connection
-      HEAT TRANSFER:
-        Option = Conservative Interface Flux
-      END
-    END
-  END
-  DOMAIN INTERFACE: CoilSolid_CoilFluid
-    Boundary List1 = CoilSolid Side 2
-    Boundary List2 = CoilFluid Side 1
-    Interface Type = Fluid Solid
-    INTERFACE MODELS:
-      Option = General Connection
-      HEAT TRANSFER:
-        Option = Conservative Interface Flux
-      END
-    END
-  END
-
   SOLVER CONTROL:
     Turbulence Numerics = High Resolution
     ADVECTION SCHEME:
@@ -287,6 +351,9 @@ with open(ccl_path, "w") as f:
 
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
 
+# Trigger auto-detection of domain interfaces for coincident faces
+setup.SendCommand(Command='> autoconnect')
+
 # ── Solve ─────────────────────────────────────────────────────────
 system.Update()
 
@@ -294,73 +361,63 @@ system.Update()
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
-post_commands = [
-    # Temperature contours
-    "PLANE: MidPlaneYZ",
-    "  Option = YZ Plane",
-    "  X = 0 [mm]",
-    "END",
-    "",
-    "CONTOUR: TempVessel",
-    "  Boundary List = MidPlaneYZ",
-    "  Colour Variable = Temperature",
-    "  Domain List = VesselFluid",
-    "  Location = MidPlaneYZ",
-    "  Range = Local",
-    "END",
-    "> export filename={}/temp_vessel.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    "CONTOUR: TempCircuit",
-    "  Boundary List = MidPlaneYZ",
-    "  Colour Variable = Temperature",
-    "  Domain List = CoilFluid, CoilSolid",
-    "  Location = MidPlaneYZ",
-    "  Range = Local",
-    "END",
-    "> export filename={}/temp_circuit.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Velocity contours
-    "CONTOUR: VelVessel",
-    "  Boundary List = MidPlaneYZ",
-    "  Colour Variable = Velocity",
-    "  Domain List = VesselFluid",
-    "  Location = MidPlaneYZ",
-    "  Range = Local",
-    "END",
-    "> export filename={}/vel_vessel.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    "CONTOUR: VelCircuit",
-    "  Boundary List = MidPlaneYZ",
-    "  Colour Variable = Velocity",
-    "  Domain List = CoilFluid",
-    "  Location = MidPlaneYZ",
-    "  Range = Local",
-    "END",
-    "> export filename={}/vel_circuit.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Geometry overview
-    "> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-]
+rd = results_dir.replace('\\', '/')
 
-for cmd in post_commands:
-    cmd = cmd.strip()
-    if cmd and not cmd.startswith('#'):
-        results.SendCommand(Command=cmd)
+post_ccl = """
+PLANE: MidPlaneXZ
+  Option = XZ Plane
+  Y = 0 [mm]
+END
 
-# Extract values to CSV
+CONTOUR: TempVessel
+  Colour Variable = Temperature
+  Domain List = VesselFluid
+  Location = MidPlaneXZ
+  Range = Local
+END
+
+CONTOUR: TempCircuit
+  Colour Variable = Temperature
+  Domain List = CoilFluid, CoilSolid
+  Location = MidPlaneXZ
+  Range = Local
+END
+
+CONTOUR: VelVessel
+  Colour Variable = Velocity
+  Domain List = VesselFluid
+  Location = MidPlaneXZ
+  Range = Local
+END
+
+CONTOUR: VelCircuit
+  Colour Variable = Velocity
+  Domain List = CoilFluid
+  Location = MidPlaneXZ
+  Range = Local
+END
+"""
+post_path = os.path.join(project_dir, "lab3_post.ccl")
+with open(post_path, "w") as f:
+    f.write(post_ccl)
+results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+
+for name, fname in [("TempVessel", "temp_vessel"), ("TempCircuit", "temp_circuit"),
+                     ("VelVessel", "vel_vessel"), ("VelCircuit", "vel_circuit")]:
+    results.SendCommand(Command='> show %s' % name)
+    results.SendCommand(
+        Command='> export filename=%s/%s.png, type=png, width=1920, height=1080, onscreen=no' % (rd, fname))
+
+results.SendCommand(
+    Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
+
+# Extract inlet/outlet values
 csv_path = os.path.join(results_dir, "values.csv")
 with open(csv_path, "w") as f:
-    f.write("Location,Temperature_K,Velocity_ms\n")
-
-calc_vars = [
-    ("Vessel_Inlet", "VesselFluid"),
-    ("Vessel_Outlet", "VesselFluid"),
-    ("Circuit_Inlet", "CoilFluid"),
-    ("Circuit_Outlet", "CoilFluid"),
-]
-for loc, domain in calc_vars:
-    results.SendCommand(Command='> calculate areaAve(Temperature)@{}, units=[K]'.format(loc))
-    results.SendCommand(Command='> calculate areaAve(Velocity)@{}, units=[m s^-1]'.format(loc))
+    f.write("Location,Variable,Unit\n")
+for loc in ["Vessel_Inlet", "Vessel_Outlet", "Circuit_Inlet", "Circuit_Outlet"]:
+    results.SendCommand(Command='> calculate areaAve(Temperature)@%s, units=[K]' % loc)
+    results.SendCommand(Command='> calculate areaAve(Velocity)@%s, units=[m s^-1]' % loc)
 
 print("Lab 3 complete. Results in: " + results_dir)
 Save(Overwrite=True)

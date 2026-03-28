@@ -1,5 +1,8 @@
 # ANSYS Workbench 2024 R1 Journal — Lab 2: CFX Steady-State (Variant 13)
 # Run: runwb2 -b -R ansys/lab2.wbjn
+#
+# Geometry: pipe D=100mm along X axis (X=0..300), cone obstacle at X=125..175.
+# Single fluid domain body after boolean subtract (pipe - cone).
 
 import os
 
@@ -27,31 +30,80 @@ geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Mesh ──────────────────────────────────────────────────────────
+# ── Meshing: Named Selections + Mesh ──────────────────────────────
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
-# Mesh settings
+# ── Named Selections (before meshing) ─────────────────────────────
+# Pipe along X: inlet at X=0, outlet at X=300, wall = everything else.
+geo = Model.Geometry
+all_faces = []
+for body in geo.GetChildren(DataModelObjectCategory.Body, True):
+    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
+        all_faces.append(face)
+
+print("Total faces: %d" % len(all_faces))
+for f in all_faces:
+    print("  Face: centroid=(%.1f, %.1f, %.1f) area=%.1f" % (
+        f.Centroid.X, f.Centroid.Y, f.Centroid.Z, f.Area))
+
+# Inlet: circular face at X=0 (pipe start)
+inlet_faces = [f for f in all_faces if abs(f.Centroid.X) < 0.5]
+# Outlet: circular face at X=300 (pipe end)
+outlet_faces = [f for f in all_faces if abs(f.Centroid.X - 300) < 0.5]
+# Wall: all other faces (cylindrical pipe wall + cone surface)
+wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_faces]
+
+print("Inlet faces: %d, Outlet faces: %d, Wall faces: %d" % (
+    len(inlet_faces), len(outlet_faces), len(wall_faces)))
+
+ns_inlet = Model.AddNamedSelection()
+ns_inlet.Name = "Inlet"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = inlet_faces
+ns_inlet.Location = sel
+
+ns_outlet = Model.AddNamedSelection()
+ns_outlet.Name = "Outlet"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = outlet_faces
+ns_outlet.Location = sel
+
+ns_wall = Model.AddNamedSelection()
+ns_wall.Name = "Wall"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = wall_faces
+ns_wall.Location = sel
+
+# ── Mesh Settings ─────────────────────────────────────────────────
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("3 mm")
-mesh.InfationOption = 1  # Inflation on
 
-# Add inflation on all walls
+# Inflation on walls for boundary layer resolution
 inflation = mesh.AddInflation()
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = wall_faces
+inflation.Location = sel
 inflation.MaximumLayers = 5
 inflation.GrowthRate = 1.2
 inflation.FirstLayerHeight = Quantity("0.3 mm")
 
-# Refinement around cone zone (center of pipe)
-sizing = mesh.AddSizing()
-sizing.ElementSize = Quantity("1.5 mm")
+# Refinement around cone (faces with centroid X between 100..200mm)
+cone_faces = [f for f in wall_faces
+              if 100 < f.Centroid.X < 200 and f not in inlet_faces and f not in outlet_faces]
+if cone_faces:
+    sizing = mesh.AddSizing()
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = cone_faces
+    sizing.Location = sel
+    sizing.ElementSize = Quantity("1.5 mm")
+    print("Cone refinement: %d faces" % len(cone_faces))
 
 mesh.GenerateMesh()
 
-# Export mesh image
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
@@ -59,39 +111,10 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── Named Selections ─────────────────────────────────────────────
-# Inlet: Z=0 face, Outlet: Z=300 face, Wall: everything else
-geo = Model.Geometry
-all_faces = []
-for body in geo.GetChildren(DataModelObjectCategory.Body, True):
-    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
-        all_faces.append(face)
-
-inlet_faces = [f for f in all_faces if abs(f.Centroid.Z) < 0.1]
-outlet_faces = [f for f in all_faces if abs(f.Centroid.Z - 300) < 0.1]
-wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_faces]
-
-ns_inlet = Model.AddNamedSelection()
-ns_inlet.Name = "Inlet"
-ns_inlet.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_inlet.Location.Entities = inlet_faces
-
-ns_outlet = Model.AddNamedSelection()
-ns_outlet.Name = "Outlet"
-ns_outlet.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_outlet.Location.Entities = outlet_faces
-
-ns_wall = Model.AddNamedSelection()
-ns_wall.Name = "Wall"
-ns_wall.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_wall.Location.Entities = wall_faces
-
 # ── CFX-Pre Setup ────────────────────────────────────────────────
-# Access CFX-Pre via Workbench scripting
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
-# Write CFX command file (.ccl) for the simulation
 ccl_content = """
 FLOW: Flow Analysis 1
   SOLUTION UNITS:
@@ -213,119 +236,108 @@ ccl_path = os.path.join(project_dir, "lab2_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-# Import CCL into CFX-Pre
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
 
 # ── Solve ─────────────────────────────────────────────────────────
-solution = system.GetContainer(ComponentName="Solution")
 system.Update()
 
 # ── CFX-Post ──────────────────────────────────────────────────────
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
-# Create mid-plane at Y=0
-post_commands = """
-# Create plane for contour plots
+rd = results_dir.replace('\\', '/')
+
+# Mid-plane at Y=0 (pipe along X, centered at Y=0, Z=0)
+post_ccl = """
 PLANE: MidPlane
-  Option = YZ Plane
-  X = 0 [mm]
+  Option = XZ Plane
+  Y = 0 [mm]
 END
 
-# Velocity contour
 CONTOUR: Velocity
-  Boundary List = MidPlane
   Colour Variable = Velocity
   Location = MidPlane
   Range = Local
 END
-> export filename={results_dir}/velocity.png, type=png, width=1920, height=1080, onscreen=no
 
-# Pressure contour
 CONTOUR: Pressure
-  Boundary List = MidPlane
   Colour Variable = Pressure
   Location = MidPlane
   Range = Local
 END
-> export filename={results_dir}/pressure.png, type=png, width=1920, height=1080, onscreen=no
 
-# Shear Strain Rate
 CONTOUR: SSR
-  Boundary List = MidPlane
   Colour Variable = Shear Strain Rate
   Location = MidPlane
   Range = Local
 END
-> export filename={results_dir}/ssr.png, type=png, width=1920, height=1080, onscreen=no
 
-# Turbulence Kinetic Energy
 CONTOUR: TKE
-  Boundary List = MidPlane
   Colour Variable = Turbulence Kinetic Energy
   Location = MidPlane
   Range = Local
 END
-> export filename={results_dir}/tke.png, type=png, width=1920, height=1080, onscreen=no
 
-# Turbulence Eddy Frequency
 CONTOUR: TEF
-  Boundary List = MidPlane
   Colour Variable = Turbulence Eddy Frequency
   Location = MidPlane
   Range = Local
 END
-> export filename={results_dir}/tef.png, type=png, width=1920, height=1080, onscreen=no
 
-# Streamlines from inlet
 STREAMLINE: Streamlines
   Boundary List = Inlet
   Colour Variable = Velocity
   Max Points = 500
   Option = From Boundary
 END
-> export filename={results_dir}/streamline.png, type=png, width=1920, height=1080, onscreen=no
 
-# Vector plot
 VECTOR: Vectors
-  Boundary List = MidPlane
   Location = MidPlane
   Variable = Velocity
 END
-> export filename={results_dir}/vector.png, type=png, width=1920, height=1080, onscreen=no
-""".format(results_dir=results_dir.replace('\\', '/'))
-
-for line in post_commands.strip().split('\n'):
-    line = line.strip()
-    if line and not line.startswith('#'):
-        results.SendCommand(Command=line)
-
-# Function calculator: extract values
-calc_commands = """
-> calculate maxVal(Velocity), units=[m s^-1]
-> calculate areaAve(Velocity)@Inlet, units=[m s^-1]
-> calculate maxVal(Pressure), units=[Pa]
-> calculate areaAve(Pressure)@Inlet, units=[Pa]
-> calculate maxVal(Shear Strain Rate), units=[s^-1]
-> calculate maxVal(Turbulence Kinetic Energy), units=[m^2 s^-2]
-> calculate maxVal(Turbulence Eddy Frequency), units=[s^-1]
 """
+# Import all objects at once
+post_ccl_path = os.path.join(project_dir, "lab2_post.ccl")
+with open(post_ccl_path, "w") as f:
+    f.write(post_ccl)
+results.SendCommand(Command='> importCCL filename=' + post_ccl_path.replace('\\', '/'))
+
+# Export images one by one (activate each object before export)
+for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vectors"]:
+    fname = name.lower().replace("streamlines", "streamline").replace("vectors", "vector")
+    results.SendCommand(Command='> show %s' % name)
+    results.SendCommand(
+        Command='> export filename=%s/%s.png, type=png, width=1920, height=1080, onscreen=no' % (rd, fname))
+
+results.SendCommand(
+    Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
+
+# ── Function Calculator → CSV ────────────────────────────────────
+# Values are printed to solver output log; also write to CSV via Python
+calc_pairs = [
+    ("maxVal", "Velocity", "", "m s^-1"),
+    ("areaAve", "Velocity", "Inlet", "m s^-1"),
+    ("areaAve", "Velocity", "Outlet", "m s^-1"),
+    ("maxVal", "Pressure", "", "Pa"),
+    ("minVal", "Pressure", "", "Pa"),
+    ("areaAve", "Pressure", "Inlet", "Pa"),
+    ("maxVal", "Shear Strain Rate", "", "s^-1"),
+    ("maxVal", "Turbulence Kinetic Energy", "", "m^2 s^-2"),
+    ("maxVal", "Turbulence Eddy Frequency", "", "s^-1"),
+]
 
 csv_path = os.path.join(results_dir, "calc.csv")
 with open(csv_path, "w") as f:
-    f.write("Parameter,Value,Unit\n")
-
-for line in calc_commands.strip().split('\n'):
-    line = line.strip()
-    if line and not line.startswith('#'):
-        results.SendCommand(Command=line)
-
-# Geometry overview
-results.SendCommand(
-    Command='> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no'.format(
-        results_dir.replace('\\', '/')
-    )
-)
+    f.write("Function,Variable,Location,Unit\n")
+    for func, var, loc, unit in calc_pairs:
+        if loc:
+            cmd = '> calculate %s(%s)@%s, units=[%s]' % (func, var, loc, unit)
+        else:
+            cmd = '> calculate %s(%s), units=[%s]' % (func, var, unit)
+        results.SendCommand(Command=cmd)
+        f.write("%s,%s,%s,%s\n" % (func, var, loc or "Domain", unit))
+        # NOTE: actual numeric values appear in console log only.
+        # Parse from <project_dir>/lab2_*_Output/*.out after run.
 
 print("Lab 2 complete. Results in: " + results_dir)
 Save(Overwrite=True)

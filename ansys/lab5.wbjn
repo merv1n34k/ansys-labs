@@ -1,19 +1,24 @@
 # ANSYS Workbench 2024 R1 Journal — Lab 5: CFX Transient Immersed Solid (Variant 13)
 # Run: runwb2 -b -R ansys/lab5.wbjn
+#
+# Geometry: single assembly STEP with 2 bodies (vessel_fluid + mixer).
+# Mixer rotates around Z axis at 400 rpm. Immersed Solid approach.
 
 import os
 
 # ── Paths ──────────────────────────────────────────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
-vessel_step = os.path.join(root_dir, "geometry", "step", "lab5_vessel.step")
-mixer_step = os.path.join(root_dir, "geometry", "step", "lab5_mixer.step")
+step_file = os.path.join(root_dir, "geometry", "step", "lab5.step")
 project_dir = os.path.join(script_dir, "projects", "lab5")
 results_dir = os.path.join(root_dir, "results", "lab5")
 
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
+
+SHELL_H = 1000.0
+R_IN = 247.9
 
 # ── Create CFX system ─────────────────────────────────────────────
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
@@ -22,22 +27,69 @@ system = template.CreateSystem()
 proj_path = os.path.join(project_dir, "lab5.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# ── Geometry Import ───────────────────────────────────────────────
-# Import both STEP files (vessel fluid domain + mixer solid)
+# ── Geometry Import (single assembly STEP) ────────────────────────
 geometry = system.GetContainer(ComponentName="Geometry")
-geometry.SetFile(FilePath=vessel_step)
-# Add second body
-geometry.AddFile(FilePath=mixer_step)
+geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Mesh ──────────────────────────────────────────────────────────
+# ── Meshing ───────────────────────────────────────────────────────
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
+# Identify bodies by volume: vessel_fluid (large) vs mixer (small)
+all_bodies = list(Model.Geometry.GetChildren(
+    DataModelObjectCategory.Body, True
+))
+all_bodies.sort(key=lambda b: b.Volume, reverse=True)
+print("Bodies: %d" % len(all_bodies))
+for b in all_bodies:
+    print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
+
+vessel_body = all_bodies[0]
+mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
+
+# ── Named Selections ─────────────────────────────────────────────
+vessel_faces = list(vessel_body.GetChildren(
+    DataModelObjectCategory.GeoFace, True
+))
+
+top_faces = []
+wall_faces = []
+bottom_faces = []
+for f in vessel_faces:
+    z = f.Centroid.Z
+    if z > SHELL_H - 5:
+        top_faces.append(f)
+    elif z < 0:
+        bottom_faces.append(f)
+    else:
+        wall_faces.append(f)
+
+print("Vessel: Top=%d Wall=%d Bottom=%d" % (len(top_faces), len(wall_faces), len(bottom_faces)))
+
+for name, faces in [("Wall", wall_faces), ("Top", top_faces), ("Bottom", bottom_faces)]:
+    ns = Model.AddNamedSelection()
+    ns.Name = name
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = faces
+    ns.Location = sel
+
+if mixer_body:
+    mixer_faces = list(mixer_body.GetChildren(
+        DataModelObjectCategory.GeoFace, True
+    ))
+    ns = Model.AddNamedSelection()
+    ns.Name = "Mixer"
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = mixer_faces
+    ns.Location = sel
+    print("Mixer: %d faces" % len(mixer_faces))
+
+# ── Mesh ──────────────────────────────────────────────────────────
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("8 mm")
 mesh.GenerateMesh()
@@ -49,53 +101,13 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── Named Selections ─────────────────────────────────────────────
-geo = Model.Geometry
-bodies = list(geo.GetChildren(DataModelObjectCategory.Body, True))
-# Body 0 = vessel (larger), Body 1 = mixer (smaller)
-vessel_body = bodies[0]
-mixer_body = bodies[1]
-
-# Vessel faces
-vessel_faces = list(vessel_body.GetChildren(DataModelObjectCategory.GeoFace, True))
-# Top face: highest Z centroid
-max_z = max(f.Centroid.Z for f in vessel_faces)
-top_faces = [f for f in vessel_faces if abs(f.Centroid.Z - max_z) < 5]
-# Bottom faces: near hemisphere bottom
-min_z = min(f.Centroid.Z for f in vessel_faces)
-bottom_faces = [f for f in vessel_faces if abs(f.Centroid.Z - min_z) < 5]
-# Wall: everything else on vessel
-wall_faces = [f for f in vessel_faces if f not in top_faces and f not in bottom_faces]
-
-ns_wall = Model.AddNamedSelection()
-ns_wall.Name = "Wall"
-ns_wall.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_wall.Location.Entities = wall_faces
-
-ns_top = Model.AddNamedSelection()
-ns_top.Name = "Top"
-ns_top.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_top.Location.Entities = top_faces
-
-ns_bottom = Model.AddNamedSelection()
-ns_bottom.Name = "Bottom"
-ns_bottom.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_bottom.Location.Entities = bottom_faces
-
-# Mixer body named selection
-mixer_faces = list(mixer_body.GetChildren(DataModelObjectCategory.GeoFace, True))
-ns_mixer = Model.AddNamedSelection()
-ns_mixer.Name = "Mixer"
-ns_mixer.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_mixer.Location.Entities = mixer_faces
-
-# ── CFX-Pre Setup via CCL ────────────────────────────────────────
+# ── CFX-Pre Setup ────────────────────────────────────────────────
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
-# Variant 13: 400 rpm, 4 s simulation
-# dt = 60/(400*36) ≈ 4.17e-3 s (36 steps per revolution)
-# 400 rpm = 400 * 2π/60 ≈ 41.888 rad/s
+# Domain references assembly body name "vessel_fluid" for fluid.
+# Immersed Solid references "Mixer" Named Selection.
+# Rotation around Z axis = Coord 0.3 (geometry is Z-up).
 ccl_content = """
 FLOW: Flow Analysis 1
   SOLUTION UNITS:
@@ -123,7 +135,7 @@ FLOW: Flow Analysis 1
   DOMAIN: FluidDomain
     Coord Frame = Coord 0
     Domain Type = Fluid
-    Location = B1
+    Location = vessel_fluid
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -186,10 +198,6 @@ FLOW: Flow Analysis 1
         END
       END
     END
-    SUBDOMAIN: MixerSubdomain
-      Coord Frame = Coord 0
-      Location = Mixer
-    END
   END
 
   IMMERSED SOLID: MixerSolid
@@ -200,7 +208,7 @@ FLOW: Flow Analysis 1
       ROTATION:
         Angular Velocity = 41.888 [rad s^-1]
         Axis Definition = Coordinate Axis
-        Rotation Axis = Coord 0.2
+        Rotation Axis = Coord 0.3
       END
     END
   END
@@ -230,7 +238,7 @@ FLOW: Flow Analysis 1
     TRANSIENT RESULTS: Transient Results 1
       File Compression Level = Default
       Option = Selected Variables
-      Output Variables List = Pressure, Velocity, Turbulence Kinetic Energy, \\
+      Output Variables List = Pressure, Velocity, Turbulence Kinetic Energy, \
         Turbulence Eddy Frequency, Wall Shear
       OUTPUT FREQUENCY:
         Option = Every Timestep
@@ -258,77 +266,67 @@ system.Update()
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
-post_commands = [
-    "PLANE: MidPlane",
-    "  Option = YZ Plane",
-    "  X = 0 [mm]",
-    "END",
-    "",
-    # Velocity contour
-    "CONTOUR: VelocityContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Velocity",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/velocity.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Pressure contour
-    "CONTOUR: PressureContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Pressure",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/pressure.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Shear Strain Rate
-    "CONTOUR: SSRContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Shear Strain Rate",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/ssr.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # TKE
-    "CONTOUR: TKEContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Turbulence Kinetic Energy",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/tke.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # TEF
-    "CONTOUR: TEFContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Turbulence Eddy Frequency",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/tef.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Geometry overview
-    "> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Animation
-    "ANIMATION: MixingAnimation",
-    "  Animation Type = Transient Results",
-    "  Variable = Velocity",
-    "  Location = MidPlane",
-    "  Format = mp4",
-    "  Filename = {}/animation.mp4".format(results_dir.replace('\\', '/')),
-    "  Frame Rate = 30",
-    "  Quality = High",
-    "END",
-    "> play animation MixingAnimation",
-]
+rd = results_dir.replace('\\', '/')
 
-for cmd in post_commands:
-    cmd = cmd.strip()
-    if cmd and not cmd.startswith('#'):
-        results.SendCommand(Command=cmd)
+post_ccl = """
+PLANE: MidPlane
+  Option = XZ Plane
+  Y = 0 [mm]
+END
+
+CONTOUR: VelocityContour
+  Colour Variable = Velocity
+  Location = MidPlane
+  Range = Local
+END
+
+CONTOUR: PressureContour
+  Colour Variable = Pressure
+  Location = MidPlane
+  Range = Local
+END
+
+CONTOUR: SSRContour
+  Colour Variable = Shear Strain Rate
+  Location = MidPlane
+  Range = Local
+END
+
+CONTOUR: TKEContour
+  Colour Variable = Turbulence Kinetic Energy
+  Location = MidPlane
+  Range = Local
+END
+
+CONTOUR: TEFContour
+  Colour Variable = Turbulence Eddy Frequency
+  Location = MidPlane
+  Range = Local
+END
+"""
+post_path = os.path.join(project_dir, "lab5_post.ccl")
+with open(post_path, "w") as f:
+    f.write(post_ccl)
+results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+
+for name, fname in [("VelocityContour", "velocity"), ("PressureContour", "pressure"),
+                     ("SSRContour", "ssr"), ("TKEContour", "tke"), ("TEFContour", "tef")]:
+    results.SendCommand(Command='> show %s' % name)
+    results.SendCommand(
+        Command='> export filename=%s/%s.png, type=png, width=1920, height=1080, onscreen=no' % (rd, fname))
+
+results.SendCommand(
+    Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
+
+# Animation: export frames, assemble with ffmpeg
+# 960 timesteps, output every 24 = 40 result files
+results.SendCommand(Command='> timeStep first')
+for i in range(40):
+    results.SendCommand(Command='> show VelocityContour')
+    results.SendCommand(
+        Command='> export filename=%s/frame_%04d.png, type=png, width=1920, height=1080, onscreen=no' % (rd, i))
+    results.SendCommand(Command='> timeStep next')
+# Combine: ffmpeg -r 10 -i frame_%04d.png -c:v libx264 -pix_fmt yuv420p animation.mp4
 
 print("Lab 5 complete. Results in: " + results_dir)
 Save(Overwrite=True)

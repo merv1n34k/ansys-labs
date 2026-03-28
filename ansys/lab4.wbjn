@@ -1,7 +1,16 @@
 # ANSYS Workbench 2024 R1 Journal — Lab 4: CFX Transient Ultrasound (Variant 13)
 # Run: runwb2 -b -R ansys/lab4.wbjn
+#
+# Geometry: stadium (capsule) bath, single fluid body.
+# Emitter: circular face at Z=5mm (top of recess), D=40mm, area ~1257 mm^2.
+# Variant 13: f=23kHz, A=1.3um.
+#
+# CRITICAL: Uses custom CompressibleWater material with Linear Elastic EOS
+# (speed of sound 1480 m/s) — library Water is incompressible and cannot
+# propagate acoustic waves.
 
 import os
+import math
 
 # ── Paths ──────────────────────────────────────────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +22,10 @@ results_dir = os.path.join(root_dir, "results", "lab4")
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
+
+EMITTER_DEPTH = 5.0
+EMITTER_D = 40.0
+EMITTER_AREA = math.pi * (EMITTER_D / 2.0) ** 2
 
 # ── Create CFX system ─────────────────────────────────────────────
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
@@ -27,16 +40,53 @@ geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Mesh ──────────────────────────────────────────────────────────
+# ── Meshing ───────────────────────────────────────────────────────
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
+geo = Model.Geometry
+all_faces = []
+for body in geo.GetChildren(DataModelObjectCategory.Body, True):
+    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
+        all_faces.append(face)
+
+print("Total faces: %d" % len(all_faces))
+for f in all_faces:
+    print("  Face: centroid=(%.1f, %.1f, %.1f) area=%.1f" % (
+        f.Centroid.X, f.Centroid.Y, f.Centroid.Z, f.Area))
+
+# Emitter: flat circular face at Z=5mm, centered at (0,0), area ~1257 mm^2
+emitter_faces = []
+wall_faces = []
+for f in all_faces:
+    if (abs(f.Centroid.Z - EMITTER_DEPTH) < 1.0
+            and abs(f.Centroid.X) < 5.0
+            and abs(f.Centroid.Y) < 5.0
+            and abs(f.Area - EMITTER_AREA) < 200):
+        emitter_faces.append(f)
+    else:
+        wall_faces.append(f)
+
+print("Emitter faces: %d (target area=%.0f)" % (len(emitter_faces), EMITTER_AREA))
+print("Wall faces: %d" % len(wall_faces))
+
+ns_emitter = Model.AddNamedSelection()
+ns_emitter.Name = "Emitter"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = emitter_faces
+ns_emitter.Location = sel
+
+ns_wall = Model.AddNamedSelection()
+ns_wall.Name = "Walls"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = wall_faces
+ns_wall.Location = sel
+
+# Mesh: 3mm elements (lambda/10 = 6.4mm, we use half for safety)
 mesh = Model.Mesh
-# λ/10 at 23 kHz, c = 1480 m/s → λ = 64.3 mm → element size ≤ 6.4 mm
-# With 128 GB RAM we can afford ~3 mm for better wave resolution
 mesh.ElementSize = Quantity("3 mm")
 mesh.GenerateMesh()
 
@@ -47,41 +97,51 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── Named Selections ─────────────────────────────────────────────
-geo = Model.Geometry
-all_faces = []
-for body in geo.GetChildren(DataModelObjectCategory.Body, True):
-    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
-        all_faces.append(face)
-
-# Emitter: flat face at the very bottom (the recess face)
-# This is a small flat circular face near Z=0
-emitter_faces = []
-wall_faces = []
-for f in all_faces:
-    if abs(f.Centroid.Z) < 2 and f.Area < 2000:  # small flat face near Z=0
-        emitter_faces.append(f)
-    else:
-        wall_faces.append(f)
-
-ns_emitter = Model.AddNamedSelection()
-ns_emitter.Name = "Emitter"
-ns_emitter.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_emitter.Location.Entities = emitter_faces
-
-ns_wall = Model.AddNamedSelection()
-ns_wall.Name = "Walls"
-ns_wall.Location = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-ns_wall.Location.Entities = wall_faces
-
-# ── CFX-Pre Setup via CCL ────────────────────────────────────────
+# ── CFX-Pre Setup ────────────────────────────────────────────────
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
-# Variant 13: f = 23 kHz, A = 1.3 μm
-# Timestep: 1/(20*f) = 1/(20*23000) ≈ 2.17e-6 s
-# Total time: ~230 periods = 230/23000 ≈ 0.01 s
+# Custom CompressibleWater: Linear Elastic EOS with c=1480 m/s.
+# Without this, library Water is incompressible → no wave propagation.
 ccl_content = """
+LIBRARY:
+  MATERIAL: CompressibleWater
+    Material Group = User
+    Option = Pure Substance
+    PROPERTIES:
+      Option = General Material
+      EQUATION OF STATE:
+        Molar Mass = 18.02 [kg kmol^-1]
+        Option = Linear Elastic
+        Reference Density = 998.2 [kg m^-3]
+        Reference Pressure = 1 [atm]
+        Reference Speed of Sound = 1480 [m s^-1]
+        Reference Temperature = 293 [K]
+      END
+      DYNAMIC VISCOSITY:
+        Dynamic Viscosity = 1.003e-3 [Pa s]
+        Option = Value
+      END
+      SPECIFIC HEAT CAPACITY:
+        Option = Value
+        Specific Heat Capacity = 4182 [J kg^-1 K^-1]
+        Specific Heat Type = Constant Pressure
+      END
+      THERMAL CONDUCTIVITY:
+        Option = Value
+        Thermal Conductivity = 0.6 [W m^-1 K^-1]
+      END
+    END
+  END
+  CEL:
+    EXPRESSIONS:
+      freq = 23000 [s^-1]
+      amp = 1.3e-3 [mm]
+      disp_z = amp * sin(2 * pi * freq * t)
+    END
+  END
+END
+
 FLOW: Flow Analysis 1
   SOLUTION UNITS:
     Angle Units = [rad]
@@ -105,12 +165,6 @@ FLOW: Flow Analysis 1
     END
   END
 
-  EXPRESSIONS:
-    freq = 23000 [Hz]
-    amp = 1.3e-3 [mm]
-    disp_y = amp * sin(2 * 3.14159265358979 * freq * t)
-  END
-
   DOMAIN: FluidDomain
     Coord Frame = Coord 0
     Domain Type = Fluid
@@ -129,9 +183,9 @@ FLOW: Flow Analysis 1
         Reference Pressure = 1 [atm]
       END
     END
-    FLUID DEFINITION: CompressibleWater
-      Material = Water
-      Option = Material Library
+    FLUID DEFINITION: Fluid 1
+      Material = CompressibleWater
+      Option = General Material
       MORPHOLOGY:
         Option = Continuous Fluid
       END
@@ -151,8 +205,8 @@ FLOW: Flow Analysis 1
         MESH MOTION:
           Option = Specified Displacement
           X Displacement = 0 [mm]
-          Y Displacement = disp_y
-          Z Displacement = 0 [mm]
+          Y Displacement = 0 [mm]
+          Z Displacement = disp_z
         END
         WALL INFLUENCE ON FLOW:
           Option = No Slip
@@ -224,48 +278,48 @@ system.Update()
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
-post_commands = [
-    "PLANE: MidPlane",
-    "  Option = YZ Plane",
-    "  X = 0 [mm]",
-    "END",
-    "",
-    "CONTOUR: PressureContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Pressure",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/pressure.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    "CONTOUR: VelocityContour",
-    "  Boundary List = MidPlane",
-    "  Colour Variable = Velocity",
-    "  Location = MidPlane",
-    "  Range = Local",
-    "END",
-    "> export filename={}/velocity.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Geometry overview
-    "> export filename={}/geometry.png, type=png, width=1920, height=1080, onscreen=no".format(results_dir.replace('\\', '/')),
-    "",
-    # Animation: iterate over transient results, export frames
-    "ANIMATION: WavePropagation",
-    "  Animation Type = Transient Results",
-    "  Variable = Pressure",
-    "  Location = MidPlane",
-    "  Format = mp4",
-    "  Filename = {}/animation.mp4".format(results_dir.replace('\\', '/')),
-    "  Frame Rate = 30",
-    "  Quality = High",
-    "END",
-    "> play animation WavePropagation",
-]
+rd = results_dir.replace('\\', '/')
 
-for cmd in post_commands:
-    cmd = cmd.strip()
-    if cmd and not cmd.startswith('#'):
-        results.SendCommand(Command=cmd)
+post_ccl = """
+PLANE: MidPlane
+  Option = XZ Plane
+  Y = 0 [mm]
+END
+
+CONTOUR: PressureContour
+  Colour Variable = Pressure
+  Location = MidPlane
+  Range = Local
+END
+
+CONTOUR: VelocityContour
+  Colour Variable = Velocity
+  Location = MidPlane
+  Range = Local
+END
+"""
+post_path = os.path.join(project_dir, "lab4_post.ccl")
+with open(post_path, "w") as f:
+    f.write(post_ccl)
+results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+
+for name, fname in [("PressureContour", "pressure"), ("VelocityContour", "velocity")]:
+    results.SendCommand(Command='> show %s' % name)
+    results.SendCommand(
+        Command='> export filename=%s/%s.png, type=png, width=1920, height=1080, onscreen=no' % (rd, fname))
+
+results.SendCommand(
+    Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
+
+# Animation: export frames from transient results, assemble with ffmpeg
+# CFX-Post batch animation varies by version; export key frames as fallback.
+results.SendCommand(Command='> timeStep first')
+for i in range(50):  # export 50 evenly spaced frames
+    results.SendCommand(Command='> show PressureContour')
+    results.SendCommand(
+        Command='> export filename=%s/frame_%04d.png, type=png, width=1920, height=1080, onscreen=no' % (rd, i))
+    results.SendCommand(Command='> timeStep next, increment=10')
+# Combine: ffmpeg -r 30 -i frame_%04d.png -c:v libx264 -pix_fmt yuv420p animation.mp4
 
 print("Lab 4 complete. Results in: " + results_dir)
 Save(Overwrite=True)

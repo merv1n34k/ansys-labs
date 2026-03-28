@@ -2,7 +2,6 @@
 # Run: runwb2 -b -R ansys/lab1.wbjn
 
 import os
-import json
 
 # ── Paths ──────────────────────────────────────────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +18,6 @@ for d in [project_dir, results_dir]:
 template = GetTemplate(TemplateName="Static Structural", Solver="ANSYS")
 system = template.CreateSystem()
 
-# Save project
 proj_path = os.path.join(project_dir, "lab1.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
@@ -33,11 +31,7 @@ mat_ss = eng_data.ImportMaterial(
 # ── Geometry Import ───────────────────────────────────────────────
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
-# Edit geometry to ensure single body import
-geometry_props = system.GetComponent(Name="Geometry")
-geometry_props.Refresh()
-
-# Update project
+system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
 # ── Model Setup (Mechanical) ─────────────────────────────────────
@@ -46,7 +40,6 @@ model.Edit()
 
 import Ansys.Mechanical.DataModel.Enums as MechEnums
 
-# Access the model tree
 analysis = Model.Analyses[0]
 geometry_obj = Model.Geometry
 
@@ -56,16 +49,28 @@ for body in geometry_obj.GetChildren(
 ):
     body.Material = "Stainless Steel"
 
+# ── Identify Bodies ──────────────────────────────────────────────
+# Assembly has 2 bodies: vessel (larger) and pads (smaller)
+all_bodies = list(geometry_obj.GetChildren(
+    MechEnums.DataModelObjectCategory.Body, True
+))
+all_bodies.sort(key=lambda b: b.Volume, reverse=True)
+vessel_body = all_bodies[0]
+pads_body = all_bodies[1] if len(all_bodies) > 1 else None
+
+print("Bodies found: %d" % len(all_bodies))
+for b in all_bodies:
+    print("  %s: Volume=%.0f mm^3" % (b.Name, b.Volume))
+
 # ── Mesh Settings ─────────────────────────────────────────────────
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("10 mm")
-mesh.GenerateMesh()
 
-# Add mesh refinement at contacts / junctions
 mesh_refine = mesh.AddRefinement()
 mesh_refine.RefinementLevel = 2
 
-# Export mesh image
+mesh.GenerateMesh()
+
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
@@ -77,60 +82,66 @@ Graphics.ExportImage(
 
 # ── Boundary Conditions ──────────────────────────────────────────
 
-# 1. Fixed Support on bottom faces of legs
+# 1. Fixed Support on outer faces of support pads
+#    Pads are at mid-height (Z~500), extending radially from R_OUT(250) to R_OUT+50(300).
+#    Outer faces have centroid at max radius (~300 mm).
 fixed = analysis.AddFixedSupport()
-# Select bottom faces of legs (lowest Z faces)
-all_faces = []
-for body in geometry_obj.GetChildren(
-    MechEnums.DataModelObjectCategory.Body, True
-):
-    for face in body.GetChildren(
+if pads_body is not None:
+    pad_faces = list(pads_body.GetChildren(
         MechEnums.DataModelObjectCategory.GeoFace, True
-    ):
-        all_faces.append(face)
+    ))
+    # Select faces with centroid radius > 295 mm (outer pad faces)
+    outer_pad_faces = []
+    for f in pad_faces:
+        r = (f.Centroid.X ** 2 + f.Centroid.Y ** 2) ** 0.5
+        if r > 295:
+            outer_pad_faces.append(f)
+    if outer_pad_faces:
+        sel = ExtAPI.SelectionManager.CreateSelectionInfo(
+            MechEnums.SelectionTypeEnum.GeometryEntities
+        )
+        sel.Entities = outer_pad_faces
+        fixed.Location = sel
+        print("Fixed support: %d pad outer faces" % len(outer_pad_faces))
 
-# Find the lowest Z faces (support leg bottoms)
-min_z = min(f.Centroid.Z for f in all_faces)
-bottom_faces = [f for f in all_faces if abs(f.Centroid.Z - min_z) < 5]
-fixed.Location = ExtAPI.SelectionManager.CreateSelectionInfo(
-    MechEnums.SelectionTypeEnum.GeometryEntities
-)
-fixed.Location.Entities = bottom_faces
-
-# 2. Internal Pressure: 1.1 MPa on all inner faces
+# 2. Internal Pressure: 1.1 MPa on inner vessel faces
+#    Inner faces: cylindrical surface at r~R_IN(247.9), hemisphere (r<R_IN),
+#    and top lid inner face (at Z=1000, r=0..R_IN).
+#    All are on the vessel body with centroid radius <= R_IN + tolerance.
 pressure = analysis.AddPressure()
 pressure.Magnitude = Quantity("1.1 MPa")
-# Select inner faces (faces with normals pointing inward)
+vessel_faces = list(vessel_body.GetChildren(
+    MechEnums.DataModelObjectCategory.GeoFace, True
+))
+R_IN = 247.9  # from common.py: (500 - 2*2.1) / 2
+R_OUT = 250.0
 inner_faces = []
-for body in geometry_obj.GetChildren(
-    MechEnums.DataModelObjectCategory.Body, True
-):
-    for face in body.GetChildren(
-        MechEnums.DataModelObjectCategory.GeoFace, True
-    ):
-        # Inner faces: approximately — faces with centroid radius < R_IN
-        r = (face.Centroid.X**2 + face.Centroid.Y**2) ** 0.5
-        if r < 248.5:  # R_IN ≈ 247.9, with tolerance
-            inner_faces.append(face)
-pressure.Location = ExtAPI.SelectionManager.CreateSelectionInfo(
+for f in vessel_faces:
+    r = (f.Centroid.X ** 2 + f.Centroid.Y ** 2) ** 0.5
+    z = f.Centroid.Z
+    # Inner faces: centroid radius < R_IN + 1mm (inner cylinder, hemisphere, top lid)
+    # Exclude outer faces: centroid radius > (R_IN + R_OUT) / 2
+    if r < (R_IN + R_OUT) / 2.0:
+        inner_faces.append(f)
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(
     MechEnums.SelectionTypeEnum.GeometryEntities
 )
-pressure.Location.Entities = inner_faces
+sel.Entities = inner_faces
+pressure.Location = sel
+print("Pressure: %d inner faces" % len(inner_faces))
 
-# 3. Thermal Condition: 75 °C
+# 3. Thermal Condition: 75 deg C
 thermal = analysis.AddThermalCondition()
 thermal.Magnitude = Quantity("75 [C]")
 
-# 4. Standard Earth Gravity
+# 4. Standard Earth Gravity (-Z direction, geometry is Z-up)
 gravity = analysis.AddAcceleration()
-gravity.YComponent = Quantity("-9806.6 mm/s^2")
+gravity.ZComponent = Quantity("-9806.6 mm/s^2")
 
 # ── Solve ─────────────────────────────────────────────────────────
 analysis.Solve()
 
 # ── Results ───────────────────────────────────────────────────────
-
-# Total Deformation
 deformation = analysis.Solution.AddTotalDeformation()
 deformation.Evaluate()
 deformation.Activate()
@@ -142,7 +153,6 @@ Graphics.ExportImage(
     ),
 )
 
-# Equivalent (von-Mises) Stress
 stress = analysis.Solution.AddEquivalentStress()
 stress.Evaluate()
 stress.Activate()
@@ -154,7 +164,6 @@ Graphics.ExportImage(
     ),
 )
 
-# Geometry overview
 geometry_obj.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "geometry.png"),
@@ -175,6 +184,4 @@ with open(csv_path, "w") as f:
     f.write("Max Equivalent Stress,{:.4f},MPa\n".format(max_stress))
 
 print("Lab 1 complete. Results in: " + results_dir)
-
-# Save and close
 Save(Overwrite=True)
