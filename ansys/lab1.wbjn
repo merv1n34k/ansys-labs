@@ -19,19 +19,15 @@ for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# -- Discover and create Static Structural system -------------------
-# List available templates for debugging
-all_templates = GetAllTemplates()
-print("Available templates:")
-for t in all_templates:
-    print("  '%s'" % t.Name)
-
-# Try known variants of the Static Structural template name
+# -- Create Static Structural system --------------------------------
 template = None
+errors = []
 for name, solver in [("Static Structural", "ANSYS"),
+                     ("Static Structural", "Mechanical APDL"),
                      ("Static Structural", None),
                      ("Static Structural (ANSYS)", None),
-                     ("Static Structural (Mechanical)", None)]:
+                     ("Structural Analysis", "ANSYS"),
+                     ("Structural Analysis", None)]:
     try:
         if solver:
             template = GetTemplate(TemplateName=name, Solver=solver)
@@ -39,11 +35,14 @@ for name, solver in [("Static Structural", "ANSYS"),
             template = GetTemplate(TemplateName=name)
         print("Found template: '%s' (solver=%s)" % (name, solver))
         break
-    except:
-        continue
+    except Exception as e:
+        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
 
 if template is None:
-    raise Exception("Could not find Static Structural template. Check available templates above.")
+    print("All template attempts failed:")
+    for err in errors:
+        print(err)
+    raise Exception("Could not find Static Structural template")
 
 system = template.CreateSystem()
 
