@@ -43,7 +43,7 @@ geom_comp.Update()
 
 # -- Model Setup (Mechanical) -------------------------------------
 model = system.GetContainer(ComponentName="Model")
-model.Edit(Interactive=False)
+model.Edit()
 
 analysis = Model.Analyses[0]
 geometry_obj = Model.Geometry

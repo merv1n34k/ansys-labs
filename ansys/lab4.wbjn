@@ -45,7 +45,7 @@ mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
-model.Edit(Interactive=False)
+model.Edit()
 
 geo = Model.Geometry
 all_faces = []
