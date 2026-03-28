@@ -1,5 +1,5 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 4: CFX Transient Ultrasound (Variant 13)
-# Run: runwb2 -b -R ansys/lab4.wbjn
+# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab4.wbjn
 #
 # Geometry: stadium (capsule) bath, single fluid body.
 # Emitter: circular face at Z=5mm (top of recess), D=40mm, area ~1257 mm^2.

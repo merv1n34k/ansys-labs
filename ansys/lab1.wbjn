@@ -1,71 +1,122 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
-# Uses Mechanical APDL template for headless batch mode
-# Run: runwb2 -B -R ansys/lab1.wbjn
+# Uses Static Structural template with STEP geometry import
+# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab1.wbjn
 
 import os
+import math
 
 # -- Paths ----------------------------------------------------------
 root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
+step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab1")
 results_dir = os.path.join(root_dir, "results", "lab1")
 
 print("ROOT: " + root_dir)
+print("STEP: " + step_file)
+print("STEP exists: " + str(os.path.exists(step_file)))
 
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# -- Write APDL input file -----------------------------------------
-rd = results_dir.replace('\\', '/')
+# -- Create Static Structural system --------------------------------
+template = GetTemplate(TemplateName="Static Structural")
+system = template.CreateSystem()
 
-apdl_lines = [
-    "FINISH",
-    "/CLEAR,START",
-    "/PREP7",
-    "",
-    "! --- Vessel geometry (Variant 13) ---",
-    "! Cylindrical shell: OD=500, wall=2.1, H=1000",
-    "CYLIND,250,247.9,0,1000",
-    "",
-    "! Top flat lid: solid disk at Z=1000",
-    "CYLIND,250,,1000,1002.1",
-    "",
-    "! Bottom hemisphere shell: centered at Z=0, extends downward",
-    "SPHERE,250,247.9",
-    "BLOCK,-300,300,-300,300,0,300",
-    "VSBV,3,4",
-    "",
-    "! Merge coincident entities and combine vessel parts",
-    "NUMMRG,KP",
-    "VSEL,ALL",
-    "VADD,ALL",
-    "",
-    "! --- Support pads: 4 rectangular, 50x10x50 at mid-height ---",
-    "BLOCK,250,300,-5,5,475,525",
-    "BLOCK,-300,-250,-5,5,475,525",
-    "BLOCK,-5,5,250,300,475,525",
-    "BLOCK,-5,5,-300,-250,475,525",
-    "",
-    "! Glue pads to vessel (shared mesh at contact)",
-    "VGLUE,ALL",
-    "",
-    "! --- Material: Stainless Steel ---",
-    "ET,1,SOLID187",
+proj_path = os.path.join(project_dir, "lab1.wbpj")
+Save(FilePath=proj_path, Overwrite=True)
+
+# -- Import Stainless Steel from material library -------------------
+eng_data = system.GetContainer(ComponentName="Engineering Data")
+eng_data.ImportMaterial(Name="Stainless Steel", Source="General_Materials.xml")
+
+# -- Import STEP geometry -------------------------------------------
+geometry = system.GetContainer(ComponentName="Geometry")
+geometry.SetFile(FilePath=step_file)
+geom_comp = system.GetComponent(Name="Geometry")
+geom_comp.Refresh()
+geom_comp.Update()
+
+# -- Open Mechanical editor -----------------------------------------
+model_container = system.GetContainer(ComponentName="Model")
+model_container.Edit()
+
+# -- Assign material to all bodies ----------------------------------
+all_bodies = list(Model.Geometry.GetChildren(
+    DataModelObjectCategory.Body, True
+))
+all_bodies.sort(key=lambda b: b.Volume, reverse=True)
+print("Bodies: %d" % len(all_bodies))
+for b in all_bodies:
+    b.Material = "Stainless Steel"
+    print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
+
+vessel_body = all_bodies[0]
+pads_body = all_bodies[1] if len(all_bodies) > 1 else None
+
+# -- Mesh -----------------------------------------------------------
+mesh = Model.Mesh
+mesh.ElementSize = Quantity("10 mm")
+mesh.GenerateMesh()
+
+mesh.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# -- Identify faces for pressure BC --------------------------------
+vessel_faces = list(vessel_body.GetChildren(
+    DataModelObjectCategory.GeoFace, True
+))
+
+inner_faces = []
+for f in vessel_faces:
+    r = math.sqrt(f.Centroid.X**2 + f.Centroid.Y**2)
+    z = f.Centroid.Z
+    if r < 248.5 and z < 1001:
+        inner_faces.append(f)
+
+print("Inner vessel faces (pressure): %d" % len(inner_faces))
+
+# -- Named Selection for pressure faces -----------------------------
+ns_pressure = Model.AddNamedSelection()
+ns_pressure.Name = "InnerFaces"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = inner_faces
+ns_pressure.Location = sel
+
+# -- Boundary Conditions --------------------------------------------
+analysis = Model.Analyses[0]
+
+# Pressure on inner vessel faces (ACT API required -- APDL SFA won't work
+# because Mechanical does not create APDL area entities from STEP geometry)
+PRESSURE = analysis.AddPressure()
+PRESSURE.Location = ns_pressure
+PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
+
+# Fixed support + thermal + gravity + material via APDL Command Snippet
+# (node-based APDL commands work fine in Mechanical context)
+cmd = analysis.AddCommandSnippet()
+cmd.Input = "\n".join([
+    "! Material: Stainless Steel (Variant 13 exact values)",
     "MP,EX,1,193e3",
     "MP,PRXY,1,0.31",
     "MP,DENS,1,7.75e-9",
     "MP,ALPX,1,1.7e-5",
     "",
-    "VSEL,ALL",
-    "VATT,1,,1",
+    "! Reference temperature for thermal strain",
+    "TREF,22",
     "",
-    "! --- Mesh ---",
-    "ESIZE,10",
-    "VMESH,ALL",
+    "! Uniform temperature load: 75 C",
+    "NSEL,ALL",
+    "BF,ALL,TEMP,75",
     "",
-    "! --- Boundary Conditions ---",
+    "! Gravity: Z-down (ACEL = reference frame acceleration)",
+    "ACEL,0,0,9806.6",
     "",
-    "! Fixed support on outer pad faces (R > 295, mid-height)",
+    "! Fixed support on outer pad faces (R > 295, mid-height zone)",
     "LOCAL,11,1,0,0,0",
     "CSYS,11",
     "NSEL,S,LOC,X,295,400",
@@ -73,116 +124,51 @@ apdl_lines = [
     "CSYS,0",
     "D,ALL,ALL",
     "",
-    "! Internal pressure 1.1 MPa on inner vessel faces (R < 248.5)",
     "NSEL,ALL",
-    "CSYS,11",
-    "ASEL,S,LOC,X,0,248.5",
-    "CSYS,0",
-    "SFA,ALL,,PRES,1.1",
-    "",
-    "! Thermal condition: 75 C (ref temp 22 C)",
-    "TREF,22",
-    "NSEL,ALL",
-    "BF,ALL,TEMP,75",
-    "",
-    "! Gravity: -Z direction",
-    "ACEL,0,0,9806.6",
-    "",
-    "NSEL,ALL",
-    "ASEL,ALL",
     "ALLS",
-    "",
-    "! --- Solve ---",
-    "/SOLU",
-    "ANTYPE,0",
-    "SOLVE",
-    "FINISH",
-    "",
-    "! --- Post-processing ---",
-    "/POST1",
-    "SET,LAST",
-    "",
-    "! Max total deformation",
-    "NSORT,U,SUM,1",
-    "*GET,NMAX1,NODE,0,NXTH",
-    "*GET,out_max_def,NODE,NMAX1,U,SUM",
-    "",
-    "! Max equivalent stress",
-    "NSORT,S,EQV,1",
-    "*GET,NMAX2,NODE,0,NXTH",
-    "*GET,out_max_stress,NODE,NMAX2,S,EQV",
-    "",
-    "! --- Image export ---",
-    "/GRAPHICS,POWER",
-    "/SHOW,PNG,,0",
-    "/GFILE,1920",
-    "/VIEW,1,1,1,1",
-    "/DSCALE,1,AUTO",
-    "PLNSOL,U,SUM",
-    "/SHOW,CLOSE",
-    "",
-    "/SHOW,PNG,,0",
-    "/GFILE,1920",
-    "/VIEW,1,1,1,1",
-    "PLNSOL,S,EQV",
-    "/SHOW,CLOSE",
-    "",
-    "FINISH",
-]
+])
 
-apdl_content = "\n".join(apdl_lines)
-dat_path = os.path.join(project_dir, "lab1.dat")
-with open(dat_path, "w") as f:
-    f.write(apdl_content)
-
-print("APDL input written to: " + dat_path)
-
-# -- Create Mechanical APDL system ---------------------------------
-template = GetTemplate(TemplateName="Mechanical APDL")
-system = template.CreateSystem()
-
-proj_path = os.path.join(project_dir, "lab1.wbpj")
-Save(FilePath=proj_path, Overwrite=True)
-
-# -- Load input file and publish output parameters ------------------
-setup = system.GetContainer(ComponentName="Setup")
-inputFile = setup.AddInputFile(FilePath=dat_path)
-
-inputFile.PublishMapdlParameter(Name="out_max_def", IsDirectOutput=True)
-inputFile.PublishMapdlParameter(Name="out_max_stress", IsDirectOutput=True)
+# -- Result objects -------------------------------------------------
+SOLN = analysis.Solution
+TOT_DEF = SOLN.AddTotalDeformation()
+EQV_STRS = SOLN.AddEquivalentStress()
 
 # -- Solve ----------------------------------------------------------
-Update()
+SOLN.Solve(True)
+SOLN.EvaluateAllResults()
 
-# -- Read results and write CSV ------------------------------------
-p_def = Parameters.GetParameter(Name="P1")
-p_stress = Parameters.GetParameter(Name="P2")
+# -- Export result images -------------------------------------------
+TOT_DEF.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "deformation.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+EQV_STRS.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "stress.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# -- Write results CSV ----------------------------------------------
+max_def = TOT_DEF.Maximum
+max_stress = EQV_STRS.Maximum
+try:
+    max_def_val = max_def.Value
+    max_stress_val = max_stress.Value
+except:
+    max_def_val = max_def
+    max_stress_val = max_stress
 
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
     f.write("Parameter,Value,Unit\n")
-    f.write("Max Total Deformation,%s,mm\n" % p_def.Value)
-    f.write("Max Equivalent Stress,%s,MPa\n" % p_stress.Value)
-
-# -- Copy image files to results dir --------------------------------
-import glob
-import shutil
-
-# MAPDL creates file000.png, file001.png in its working directory
-project_base = os.path.splitext(proj_path)[0] + "_files"
-png_files = sorted(glob.glob(os.path.join(project_base, "**", "file*.png"), recursive=True))
-
-if len(png_files) >= 2:
-    shutil.copy2(png_files[0], os.path.join(results_dir, "deformation.png"))
-    shutil.copy2(png_files[1], os.path.join(results_dir, "stress.png"))
-    print("Images copied to results dir")
-elif len(png_files) >= 1:
-    shutil.copy2(png_files[0], os.path.join(results_dir, "deformation.png"))
-    print("Partial images copied")
-else:
-    print("No image files found (non-critical)")
+    f.write("Max Total Deformation,%s,mm\n" % max_def_val)
+    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
 
 print("Lab 1 complete. Results in: " + results_dir)
-print("Max Deformation: %s mm" % p_def.Value)
-print("Max Stress: %s MPa" % p_stress.Value)
+print("Max Deformation: %s mm" % max_def_val)
+print("Max Stress: %s MPa" % max_stress_val)
 Save(Overwrite=True)

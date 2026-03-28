@@ -1,5 +1,5 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 5: CFX Transient Immersed Solid (Variant 13)
-# Run: runwb2 -b -R ansys/lab5.wbjn
+# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab5.wbjn
 #
 # Geometry: single assembly STEP with 2 bodies (vessel_fluid + mixer).
 # Mixer rotates around Z axis at 400 rpm. Immersed Solid approach.

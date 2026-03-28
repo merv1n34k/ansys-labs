@@ -59,39 +59,39 @@ l4g:
 l5g:
 	cd $(GEOM_DIR) && uv run python lab5.py
 
-# ── ANSYS solve targets (runs on Linux with ANSYS) ────────────────
+# ── ANSYS solve targets (runs on Linux with ANSYS + xvfb-run) ─────
 
 l1s:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab1.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab1.wbjn
 
 l2s:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab2.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab2.wbjn
 
 l3s:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab3.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab3.wbjn
 
 l4s:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab4.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab4.wbjn
 
 l5s:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab5.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab5.wbjn
 
 # ── Post-processing targets (runs on Linux with ANSYS) ────────────
 
 l1p:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab1_post.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab1_post.wbjn
 
 l2p:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab2_post.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab2_post.wbjn
 
 l3p:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab3_post.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab3_post.wbjn
 
 l4p:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab4_post.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab4_post.wbjn
 
 l5p:
-	$(RUNWB2) -B -R $(ANSYS_DIR)/lab5_post.wbjn
+	$(RUNWB2) -R $(ANSYS_DIR)/lab5_post.wbjn
 
 # ── Reports (LaTeX) ──────────────────────────────────────────────
 
