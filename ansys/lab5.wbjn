@@ -1,4 +1,4 @@
-# ANSYS Workbench 2024 R1 Journal — Lab 5: CFX Transient Immersed Solid (Variant 13)
+# ANSYS Workbench 2024 R1 Journal -- Lab 5: CFX Transient Immersed Solid (Variant 13)
 # Run: runwb2 -b -R ansys/lab5.wbjn
 #
 # Geometry: single assembly STEP with 2 bodies (vessel_fluid + mixer).
@@ -6,7 +6,7 @@
 
 import os
 
-# ── Paths ──────────────────────────────────────────────────────────
+# -- Paths ----------------------------------------------------------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
 step_file = os.path.join(root_dir, "geometry", "step", "lab5.step")
@@ -20,20 +20,20 @@ for d in [project_dir, results_dir]:
 SHELL_H = 1000.0
 R_IN = 247.9
 
-# ── Create CFX system ─────────────────────────────────────────────
+# -- Create CFX system ---------------------------------------------
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab5.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# ── Geometry Import (single assembly STEP) ────────────────────────
+# -- Geometry Import (single assembly STEP) ------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Meshing ───────────────────────────────────────────────────────
+# -- Meshing -------------------------------------------------------
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
@@ -52,7 +52,7 @@ for b in all_bodies:
 vessel_body = all_bodies[0]
 mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
 
-# ── Named Selections ─────────────────────────────────────────────
+# -- Named Selections ---------------------------------------------
 vessel_faces = list(vessel_body.GetChildren(
     DataModelObjectCategory.GeoFace, True
 ))
@@ -89,7 +89,7 @@ if mixer_body:
     ns.Location = sel
     print("Mixer: %d faces" % len(mixer_faces))
 
-# ── Mesh ──────────────────────────────────────────────────────────
+# -- Mesh ----------------------------------------------------------
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("8 mm")
 mesh.GenerateMesh()
@@ -101,7 +101,7 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── CFX-Pre Setup ────────────────────────────────────────────────
+# -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
@@ -259,10 +259,10 @@ with open(ccl_path, "w") as f:
 
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
 
-# ── Solve ─────────────────────────────────────────────────────────
+# -- Solve ---------------------------------------------------------
 system.Update()
 
-# ── CFX-Post ──────────────────────────────────────────────────────
+# -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 

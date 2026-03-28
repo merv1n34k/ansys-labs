@@ -1,9 +1,9 @@
-# ANSYS Workbench 2024 R1 Journal — Lab 1: Static Structural (Variant 13)
+# ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
 # Run: runwb2 -b -R ansys/lab1.wbjn
 
 import os
 
-# ── Paths ──────────────────────────────────────────────────────────
+# -- Paths ----------------------------------------------------------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
 step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
@@ -14,27 +14,27 @@ for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# ── Create Static Structural system ───────────────────────────────
+# -- Create Static Structural system -------------------------------
 template = GetTemplate(TemplateName="Static Structural", Solver="ANSYS")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab1.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# ── Engineering Data: Stainless Steel ─────────────────────────────
+# -- Engineering Data: Stainless Steel -----------------------------
 eng_data = system.GetContainer(ComponentName="Engineering Data")
 mat_ss = eng_data.ImportMaterial(
     Name="Stainless Steel",
     Source="General_Materials.xml"
 )
 
-# ── Geometry Import ───────────────────────────────────────────────
+# -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Model Setup (Mechanical) ─────────────────────────────────────
+# -- Model Setup (Mechanical) -------------------------------------
 model = system.GetContainer(ComponentName="Model")
 model.Edit()
 
@@ -49,7 +49,7 @@ for body in geometry_obj.GetChildren(
 ):
     body.Material = "Stainless Steel"
 
-# ── Identify Bodies ──────────────────────────────────────────────
+# -- Identify Bodies ----------------------------------------------
 # Assembly has 2 bodies: vessel (larger) and pads (smaller)
 all_bodies = list(geometry_obj.GetChildren(
     MechEnums.DataModelObjectCategory.Body, True
@@ -62,7 +62,7 @@ print("Bodies found: %d" % len(all_bodies))
 for b in all_bodies:
     print("  %s: Volume=%.0f mm^3" % (b.Name, b.Volume))
 
-# ── Mesh Settings ─────────────────────────────────────────────────
+# -- Mesh Settings -------------------------------------------------
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("10 mm")
 
@@ -80,7 +80,7 @@ Graphics.ExportImage(
     ),
 )
 
-# ── Boundary Conditions ──────────────────────────────────────────
+# -- Boundary Conditions ------------------------------------------
 
 # 1. Fixed Support on outer faces of support pads
 #    Pads are at mid-height (Z~500), extending radially from R_OUT(250) to R_OUT+50(300).
@@ -138,10 +138,10 @@ thermal.Magnitude = Quantity("75 [C]")
 gravity = analysis.AddAcceleration()
 gravity.ZComponent = Quantity("-9806.6 mm/s^2")
 
-# ── Solve ─────────────────────────────────────────────────────────
+# -- Solve ---------------------------------------------------------
 analysis.Solve()
 
-# ── Results ───────────────────────────────────────────────────────
+# -- Results -------------------------------------------------------
 deformation = analysis.Solution.AddTotalDeformation()
 deformation.Evaluate()
 deformation.Activate()
@@ -173,7 +173,7 @@ Graphics.ExportImage(
     ),
 )
 
-# ── Export CSV summary ────────────────────────────────────────────
+# -- Export CSV summary --------------------------------------------
 max_deformation = deformation.Maximum.Value
 max_stress = stress.Maximum.Value
 

@@ -1,4 +1,4 @@
-# ANSYS Workbench 2024 R1 Journal — Lab 2: CFX Steady-State (Variant 13)
+# ANSYS Workbench 2024 R1 Journal -- Lab 2: CFX Steady-State (Variant 13)
 # Run: runwb2 -b -R ansys/lab2.wbjn
 #
 # Geometry: pipe D=100mm along X axis (X=0..300), cone obstacle at X=125..175.
@@ -6,7 +6,7 @@
 
 import os
 
-# ── Paths ──────────────────────────────────────────────────────────
+# -- Paths ----------------------------------------------------------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
 step_file = os.path.join(root_dir, "geometry", "step", "lab2.step")
@@ -17,27 +17,27 @@ for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# ── Create CFX system ─────────────────────────────────────────────
+# -- Create CFX system ---------------------------------------------
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab2.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# ── Geometry Import ───────────────────────────────────────────────
+# -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Meshing: Named Selections + Mesh ──────────────────────────────
+# -- Meshing: Named Selections + Mesh ------------------------------
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
-# ── Named Selections (before meshing) ─────────────────────────────
+# -- Named Selections (before meshing) -----------------------------
 # Pipe along X: inlet at X=0, outlet at X=300, wall = everything else.
 geo = Model.Geometry
 all_faces = []
@@ -78,7 +78,7 @@ sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEnti
 sel.Entities = wall_faces
 ns_wall.Location = sel
 
-# ── Mesh Settings ─────────────────────────────────────────────────
+# -- Mesh Settings -------------------------------------------------
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("3 mm")
 
@@ -111,7 +111,7 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── CFX-Pre Setup ────────────────────────────────────────────────
+# -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
@@ -238,10 +238,10 @@ with open(ccl_path, "w") as f:
 
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
 
-# ── Solve ─────────────────────────────────────────────────────────
+# -- Solve ---------------------------------------------------------
 system.Update()
 
-# ── CFX-Post ──────────────────────────────────────────────────────
+# -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
@@ -312,7 +312,7 @@ for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vector
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-# ── Function Calculator → CSV ────────────────────────────────────
+# -- Function Calculator -> CSV ------------------------------------
 # Values are printed to solver output log; also write to CSV via Python
 calc_pairs = [
     ("maxVal", "Velocity", "", "m s^-1"),

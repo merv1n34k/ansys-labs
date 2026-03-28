@@ -1,4 +1,4 @@
-# ANSYS Workbench 2024 R1 Journal — Lab 4: CFX Transient Ultrasound (Variant 13)
+# ANSYS Workbench 2024 R1 Journal -- Lab 4: CFX Transient Ultrasound (Variant 13)
 # Run: runwb2 -b -R ansys/lab4.wbjn
 #
 # Geometry: stadium (capsule) bath, single fluid body.
@@ -6,13 +6,13 @@
 # Variant 13: f=23kHz, A=1.3um.
 #
 # CRITICAL: Uses custom CompressibleWater material with Linear Elastic EOS
-# (speed of sound 1480 m/s) — library Water is incompressible and cannot
+# (speed of sound 1480 m/s) -- library Water is incompressible and cannot
 # propagate acoustic waves.
 
 import os
 import math
 
-# ── Paths ──────────────────────────────────────────────────────────
+# -- Paths ----------------------------------------------------------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
 step_file = os.path.join(root_dir, "geometry", "step", "lab4.step")
@@ -27,20 +27,20 @@ EMITTER_DEPTH = 5.0
 EMITTER_D = 40.0
 EMITTER_AREA = math.pi * (EMITTER_D / 2.0) ** 2
 
-# ── Create CFX system ─────────────────────────────────────────────
+# -- Create CFX system ---------------------------------------------
 template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab4.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# ── Geometry Import ───────────────────────────────────────────────
+# -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 system.GetComponent(Name="Geometry").Refresh()
 system.Update()
 
-# ── Meshing ───────────────────────────────────────────────────────
+# -- Meshing -------------------------------------------------------
 mesh_component = system.GetComponent(Name="Mesh")
 mesh_component.Refresh()
 
@@ -97,12 +97,12 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# ── CFX-Pre Setup ────────────────────────────────────────────────
+# -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
 # Custom CompressibleWater: Linear Elastic EOS with c=1480 m/s.
-# Without this, library Water is incompressible → no wave propagation.
+# Without this, library Water is incompressible -> no wave propagation.
 ccl_content = """
 LIBRARY:
   MATERIAL: CompressibleWater
@@ -271,10 +271,10 @@ with open(ccl_path, "w") as f:
 
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
 
-# ── Solve ─────────────────────────────────────────────────────────
+# -- Solve ---------------------------------------------------------
 system.Update()
 
-# ── CFX-Post ──────────────────────────────────────────────────────
+# -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
 
