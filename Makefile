@@ -11,6 +11,7 @@ RESULTS_DIR := results
 REPORTS_DIR := reports
 
 LABS := lab1 lab2 lab3 lab4 lab5
+RUNWB2 ?= ansys.sh wb
 
 # ── Standard targets ──────────────────────────────────────────────
 
@@ -59,36 +60,36 @@ l5g:
 # ── ANSYS solve targets (runs on Linux with ANSYS) ────────────────
 
 l1s:
-	runwb2 -b -R $(ANSYS_DIR)/lab1.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab1.wbjn
 
 l2s:
-	runwb2 -b -R $(ANSYS_DIR)/lab2.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab2.wbjn
 
 l3s:
-	runwb2 -b -R $(ANSYS_DIR)/lab3.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab3.wbjn
 
 l4s:
-	runwb2 -b -R $(ANSYS_DIR)/lab4.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab4.wbjn
 
 l5s:
-	runwb2 -b -R $(ANSYS_DIR)/lab5.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab5.wbjn
 
 # ── Post-processing targets (runs on Linux with ANSYS) ────────────
 
 l1p:
-	runwb2 -b -R $(ANSYS_DIR)/lab1_post.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab1_post.wbjn
 
 l2p:
-	runwb2 -b -R $(ANSYS_DIR)/lab2_post.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab2_post.wbjn
 
 l3p:
-	runwb2 -b -R $(ANSYS_DIR)/lab3_post.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab3_post.wbjn
 
 l4p:
-	runwb2 -b -R $(ANSYS_DIR)/lab4_post.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab4_post.wbjn
 
 l5p:
-	runwb2 -b -R $(ANSYS_DIR)/lab5_post.wbjn
+	$(RUNWB2) -B -R $(ANSYS_DIR)/lab5_post.wbjn
 
 # ── Reports (LaTeX) ──────────────────────────────────────────────
 
