@@ -23,20 +23,20 @@ CONE_H = 50.0
 CONE_BASE_R = CONE_BASE_D / 2
 CONE_TIP_R = CONE_TIP_D / 2
 
-# Pipe runs along Z axis: Z=0 (inlet) to Z=PIPE_L (outlet)
-# Cone centered at Z = PIPE_L / 2, wide base facing inlet (negative Z direction)
+# Pipe runs along X axis (horizontal): X=0 (inlet) to X=PIPE_L (outlet)
+# Cone centered at X = PIPE_L / 2, wide base facing inlet (negative X direction)
 
-# Build pipe (fluid domain cylinder)
-pipe = cq.Workplane("XY").circle(PIPE_R).extrude(PIPE_L)
+# Build pipe (fluid domain cylinder along X)
+pipe = cq.Workplane("YZ").circle(PIPE_R).extrude(PIPE_L)
 
 # Build cone as a lofted frustum between two circles
-cone_center_z = PIPE_L / 2
-cone_base_z = cone_center_z - CONE_H / 2  # wide end, faces inlet
-cone_tip_z = cone_center_z + CONE_H / 2  # narrow end, faces outlet
+cone_center_x = PIPE_L / 2
+cone_base_x = cone_center_x - CONE_H / 2  # wide end, faces inlet
+cone_tip_x = cone_center_x + CONE_H / 2  # narrow end, faces outlet
 
 cone = (
-    cq.Workplane("XY")
-    .workplane(offset=cone_base_z)
+    cq.Workplane("YZ")
+    .workplane(offset=cone_base_x)
     .circle(CONE_BASE_R)
     .workplane(offset=CONE_H)
     .circle(CONE_TIP_R)

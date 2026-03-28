@@ -69,29 +69,32 @@ def make_vessel_inner_volume() -> cq.Workplane:
     return volume
 
 
-def make_support_legs(n_legs: int = 4, leg_h: float = 150.0, leg_r: float = 20.0) -> cq.Workplane:
-    """Create cylindrical support legs arranged around the vessel bottom.
+def make_support_pads(n_pads: int = 4, pad_w: float = 50.0, pad_h: float = 50.0, pad_t: float = 10.0) -> cq.Workplane:
+    """Create rectangular support pads on the vessel outer wall at mid-height.
 
-    Legs are placed at the equator of the hemisphere bottom (Z=0 plane),
-    evenly spaced angularly.
+    4 pads at 0/90/180/270 degrees, touching the cylindrical surface.
+    pad_w x pad_h is the face visible from outside, pad_t protrudes radially outward.
     """
     import math
 
-    placement_r = R_OUT - leg_r - 5  # slightly inward from outer wall
+    mid_z = SHELL_H / 2
     result = None
-    for i in range(n_legs):
-        angle = 2 * math.pi * i / n_legs
-        cx = placement_r * math.cos(angle)
-        cy = placement_r * math.sin(angle)
-        leg = (
+    for i in range(n_pads):
+        angle_deg = 360.0 * i / n_pads
+        # Build pad at 0° position (+X axis): slim face (pad_h x pad_t) touches vessel at R_OUT
+        # pad_w extends radially outward, pad_t is tangential width, pad_h is vertical
+        pad = (
             cq.Workplane("XY")
-            .workplane(offset=-R_OUT - leg_h)
-            .center(cx, cy)
-            .circle(leg_r)
-            .extrude(leg_h)
+            .workplane(offset=mid_z - pad_h / 2)
+            .center(R_OUT + pad_w / 2, 0)
+            .rect(pad_w, pad_t)
+            .extrude(pad_h)
         )
+        # Rotate to final angular position
+        if angle_deg != 0:
+            pad = pad.rotate((0, 0, 0), (0, 0, 1), angle_deg)
         if result is None:
-            result = leg
+            result = pad
         else:
-            result = result.union(leg)
+            result = result.union(pad)
     return result

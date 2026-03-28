@@ -1,86 +1,91 @@
 """Lab 5 — Mixing / Immersed Solid geometry, Variant 13.
 
 Two separate bodies:
-  1. Vessel inner volume (fluid domain) — same shape as Lab 1 interior
-  2. Anchor mixer (U-shaped impeller) — immersed solid
+  1. Vessel inner volume (fluid domain)
+  2. Anchor mixer:
+     - Central axle: flat top, rounded bottom
+     - U-tube (two arms + bottom bar with round corners)
+     - Bottom bar passes through the axle
+     - Axle extends below the bar by a small wedge
+     - Arms are free (unconnected) at the top
 
-Exports two STEP files: lab5_vessel.step and lab5_mixer.step.
+Exports assembly STEP (lab5.step) + individual files for viewing.
 """
 
 import math
 from pathlib import Path
 
 import cadquery as cq
+from cadquery import Vector
 
 from common import make_vessel_inner_volume, R_IN, SHELL_H
 
 # Mixer dimensions (mm)
-SHAFT_D = 30.0
-SHAFT_R = SHAFT_D / 2
-ARM_WIDTH = 20.0
-ARM_THICKNESS = 10.0
-ARM_HEIGHT = 800.0
-ARM_RADIUS = 230.0  # distance from center axis to arm center
-BAR_WIDTH = ARM_WIDTH
-BAR_THICKNESS = ARM_THICKNESS
+TUBE_D = 20.0
+TUBE_R = TUBE_D / 2
+ARM_RADIUS = 220.0
+CORNER_R = 60.0
+AXLE_D = 30.0
+AXLE_R = AXLE_D / 2
+WEDGE = 30.0  # axle extension below the U bottom bar
 
-# Shaft extends from hemisphere bottom to vessel top
-# Hemisphere bottom is at Z = -R_IN (approx -247.9 mm)
-# Vessel top is at Z = SHELL_H (1000 mm)
-SHAFT_BOTTOM_Z = -R_IN + 20  # 20mm clearance from hemisphere bottom
-SHAFT_TOP_Z = SHELL_H
-SHAFT_LENGTH = SHAFT_TOP_Z - SHAFT_BOTTOM_Z
+# Vertical layout
+ARM_BOTTOM_Z = -math.sqrt(R_IN**2 - ARM_RADIUS**2) + 40
+ARM_TOP_Z = 800.0
+ARM_LENGTH = ARM_TOP_Z - ARM_BOTTOM_Z
+
+# Axle: rounded bottom extends below bar, flat top, total >= 2x arm length
+AXLE_BOTTOM_Z = ARM_BOTTOM_Z - WEDGE
+AXLE_TOP_Z = AXLE_BOTTOM_Z + 2.0 * ARM_LENGTH
 
 
-def make_anchor_mixer() -> cq.Workplane:
-    """Build the anchor (U-shaped) mixer."""
-    # Central shaft
-    shaft = (
-        cq.Workplane("XY")
-        .workplane(offset=SHAFT_BOTTOM_Z)
-        .circle(SHAFT_R)
-        .extrude(SHAFT_LENGTH)
-    )
+def make_anchor_mixer():
+    """Build anchor mixer: axle + U-tube intersecting at the bottom."""
 
-    # Arms bottom Z: where the hemisphere surface intersects at ARM_RADIUS
-    # Hemisphere eq: x^2 + y^2 + z^2 = R_IN^2 => z = -sqrt(R_IN^2 - ARM_RADIUS^2)
-    arm_bottom_z = -math.sqrt(R_IN**2 - ARM_RADIUS**2) + 10  # 10mm clearance
-
-    # Two vertical arms at 0 and 180 degrees
-    arm1 = (
+    # === 1. U-tube path (XZ plane, Y=0) with round corners ===
+    u_path = (
         cq.Workplane("XZ")
-        .workplane(offset=-ARM_THICKNESS / 2)
-        .center(ARM_RADIUS, arm_bottom_z)
-        .rect(ARM_WIDTH, ARM_HEIGHT)
-        .extrude(ARM_THICKNESS)
+        .moveTo(ARM_RADIUS, ARM_TOP_Z)
+        .lineTo(ARM_RADIUS, ARM_BOTTOM_Z + CORNER_R)
+        .threePointArc(
+            (ARM_RADIUS - CORNER_R * (1 - math.cos(math.pi / 4)),
+             ARM_BOTTOM_Z + CORNER_R * (1 - math.sin(math.pi / 4))),
+            (ARM_RADIUS - CORNER_R, ARM_BOTTOM_Z),
+        )
+        .lineTo(-ARM_RADIUS + CORNER_R, ARM_BOTTOM_Z)
+        .threePointArc(
+            (-ARM_RADIUS + CORNER_R * (1 - math.cos(math.pi / 4)),
+             ARM_BOTTOM_Z + CORNER_R * (1 - math.sin(math.pi / 4))),
+            (-ARM_RADIUS, ARM_BOTTOM_Z + CORNER_R),
+        )
+        .lineTo(-ARM_RADIUS, ARM_TOP_Z)
+        .consolidateWires()
     )
-    arm2 = (
-        cq.Workplane("XZ")
-        .workplane(offset=-ARM_THICKNESS / 2)
-        .center(-ARM_RADIUS, arm_bottom_z)
-        .rect(ARM_WIDTH, ARM_HEIGHT)
-        .extrude(ARM_THICKNESS)
-    )
+    wire = u_path.val()
+    start = wire.startPoint()
+    tangent = wire.tangentAt(0)
+    circle = cq.Wire.makeCircle(TUBE_R, center=start, normal=tangent)
+    face = cq.Face.makeFromWires(circle)
+    u_tube = cq.Workplane("XY").newObject([cq.Solid.sweep(face, wire, isFrenet=True)])
 
-    # Bottom horizontal bar connecting the two arms
-    bar_z = arm_bottom_z  # same Z as arm bottoms
-    bar_length = 2 * ARM_RADIUS + ARM_WIDTH  # spans full width between arms
-    bar = (
+    # === 2. Central axle: flat top, rounded bottom ===
+    axle = (
         cq.Workplane("XY")
-        .workplane(offset=bar_z - BAR_THICKNESS / 2)
-        .rect(bar_length, BAR_WIDTH)
-        .extrude(BAR_THICKNESS)
+        .workplane(offset=AXLE_BOTTOM_Z)
+        .circle(AXLE_R)
+        .extrude(AXLE_TOP_Z - AXLE_BOTTOM_Z)
     )
+    # Round only the bottom edge
+    axle = axle.edges("<Z").fillet(AXLE_R * 0.99)
 
-    mixer = shaft.union(arm1).union(arm2).union(bar)
+    # === Union: U-tube + axle (bar passes through axle at bottom) ===
+    mixer = u_tube.union(axle)
     return mixer
 
 
-# Build both bodies
 vessel = make_vessel_inner_volume()
 mixer = make_anchor_mixer()
 
-# Export
 step_dir = Path(__file__).parent / "step"
 step_dir.mkdir(exist_ok=True)
 
@@ -93,4 +98,16 @@ print(f"Exported {vessel_path.name} -> BBox: X={bb_v.xlen:.1f} Y={bb_v.ylen:.1f}
 
 cq.exporters.export(mixer, str(mixer_path))
 bb_m = mixer.val().BoundingBox()
+arm_len = ARM_TOP_Z - ARM_BOTTOM_Z
+axle_len = AXLE_TOP_Z - AXLE_BOTTOM_Z
 print(f"Exported {mixer_path.name} -> BBox: X={bb_m.xlen:.1f} Y={bb_m.ylen:.1f} Z={bb_m.zlen:.1f} mm")
+print(f"  Arm length: {arm_len:.0f} mm, Axle length: {axle_len:.0f} mm (ratio {axle_len/arm_len:.1f}x)")
+print(f"  Wedge below bar: {WEDGE:.0f} mm")
+
+# Assembly STEP for ANSYS (both bodies in one file, named)
+assy = cq.Assembly()
+assy.add(vessel, name="vessel_fluid", color=cq.Color("CadetBlue"))
+assy.add(mixer, name="mixer", color=cq.Color("Orange"))
+assy_path = step_dir / "lab5.step"
+assy.export(str(assy_path))
+print(f"Exported {assy_path.name} (assembly: vessel_fluid + mixer)")
