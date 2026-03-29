@@ -114,13 +114,8 @@ sel.Entities = wall_faces
 ns_wall.Location = sel
 
 mesh = Model.Mesh
-mesh.ElementSize = Quantity("3 [mm]")
-mesh.GenerateMesh()
-
-mesh.Activate()
-Graphics.ExportImage(
-    os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG)
+mesh.ElementSize = Quantity("5 [mm]")
+# Do NOT call GenerateMesh() here -- let system.Update() mesh once
 print("Mesh script done")
 """
 

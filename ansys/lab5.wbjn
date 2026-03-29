@@ -112,11 +112,35 @@ if mixer_body:
     ns.Location = sel
     print("Mixer: %d faces" % len(mixer_faces))
 
+# Body-level named selections for CFX domain/immersed solid
+if mixer_body:
+    try:
+        ns = Model.AddNamedSelection()
+        ns.Name = "MixerBody"
+        sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+        sel.Entities = [mixer_body.GetGeoBody()]
+        ns.Location = sel
+        print("MixerBody NS created (geo)")
+    except Exception as e:
+        try:
+            ns = Model.AddNamedSelection()
+            ns.Name = "MixerBody"
+            sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+            sel.Entities = [mixer_body]
+            ns.Location = sel
+            print("MixerBody NS created (dm)")
+        except Exception as e2:
+            print("MixerBody NS failed: %s / %s" % (e, e2))
+
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("8 [mm]")
 mesh.GenerateMesh()
 
 mesh.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
     GraphicsImageExportFormat.PNG)
@@ -180,10 +204,9 @@ FLOW: Flow Analysis 1
     END
   END
 
-  DOMAIN: FluidDomain
+  DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
-    Location = vessel_fluid
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -249,8 +272,8 @@ FLOW: Flow Analysis 1
   END
 
   IMMERSED SOLID: MixerSolid
-    Domain List = FluidDomain
-    Location = Mixer
+    Domain List = Default Domain
+    Location = MixerBody
     IMMERSED SOLID MOTION:
       Option = Rotating
       ROTATION:
@@ -280,6 +303,9 @@ FLOW: Flow Analysis 1
         Option = Automatic
       END
     END
+    EXPERT PARAMETERS:
+      check isolated regions = f
+    END
   END
 
   OUTPUT CONTROL:
@@ -296,7 +322,7 @@ FLOW: Flow Analysis 1
   END
 
   COMMAND FILE:
-    Solver Args = -part 12
+    Solver Args = -part 4
   END
 END
 """

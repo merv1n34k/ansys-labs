@@ -130,6 +130,10 @@ if cone_faces:
 mesh.GenerateMesh()
 
 mesh.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
     GraphicsImageExportFormat.PNG)
@@ -375,16 +379,20 @@ calc_pairs = [
     ("maxVal", "Turbulence Eddy Frequency", "", "s^-1"),
 ]
 
-csv_path = os.path.join(results_dir, "calc.csv")
-with open(csv_path, "w") as f:
-    f.write("Function,Variable,Location,Unit\n")
-    for func, var, loc, unit in calc_pairs:
-        if loc:
-            cmd = '> calculate %s(%s)@%s, units=[%s]' % (func, var, loc, unit)
-        else:
-            cmd = '> calculate %s(%s), units=[%s]' % (func, var, unit)
-        results.SendCommand(Command=cmd)
-        f.write("%s,%s,%s,%s\n" % (func, var, loc or "Domain", unit))
+# Use CFX-Post Power Syntax (Perl) to evaluate and write CSV with values
+power_lines = [
+    "!open(my $fh, '>', '%s/calc.csv') or die;" % rd,
+    '!print $fh "Function,Variable,Location,Unit,Value\\n";',
+    '!my $v;',
+]
+for func, var, loc, unit in calc_pairs:
+    loc_str = "@%s" % loc if loc else ""
+    power_lines.append(
+        "!$v = evaluate('%s(%s)%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
+        % (func, var, loc_str, func, var, loc or "Domain", unit))
+power_lines.append('!close($fh);')
+
+results.SendCommand(Command='\n'.join(power_lines))
 
 print("Lab 2 complete. Results in: " + results_dir)
 Save(Overwrite=True)

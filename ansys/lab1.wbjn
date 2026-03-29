@@ -85,6 +85,10 @@ mesh.ElementSize = Quantity("10 [mm]")
 mesh.GenerateMesh()
 
 mesh.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
     GraphicsImageExportFormat.PNG)
@@ -123,27 +127,22 @@ PRESSURE.Location = ns_pressure
 PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
 
 cmd = analysis.AddCommandSnippet()
-cmd.Input = '''! Material: Stainless Steel (Variant 13 exact values)
-MP,EX,1,193e3
-MP,PRXY,1,0.31
-MP,DENS,1,7.75e-9
-MP,ALPX,1,1.7e-5
-
-! Reference temperature for thermal strain
+cmd.Input = '''! Reference temperature for thermal strain
 TREF,22
 
 ! Uniform temperature load: 75 C
 NSEL,ALL
 BF,ALL,TEMP,75
 
-! Gravity: Z-down (ACEL = reference frame acceleration)
-ACEL,0,0,9806.6
+! Gravity: Z-down in MKS units (m/s^2)
+ACEL,0,0,9.8066
 
-! Fixed support on outer pad faces (R > 295, mid-height zone)
+! Fixed support on outer pad faces
+! MKS coords: R=0.295-0.400m, Z=0.400-0.600m
 LOCAL,11,1,0,0,0
 CSYS,11
-NSEL,S,LOC,X,295,400
-NSEL,R,LOC,Z,400,600
+NSEL,S,LOC,X,0.295,0.400
+NSEL,R,LOC,Z,0.400,0.600
 CSYS,0
 D,ALL,ALL
 
@@ -161,11 +160,19 @@ SOLN.EvaluateAllResults()
 
 # -- Export result images --
 TOT_DEF.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "deformation.png"),
     GraphicsImageExportFormat.PNG)
 
 EQV_STRS.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "stress.png"),
     GraphicsImageExportFormat.PNG)
