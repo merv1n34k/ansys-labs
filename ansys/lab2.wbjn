@@ -186,10 +186,9 @@ FLOW: Flow Analysis 1
   ANALYSIS TYPE:
     Option = Steady State
   END
-  DOMAIN: FluidDomain
+  DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
-    Location = B1
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -294,7 +293,7 @@ ccl_path = os.path.join(project_dir, "lab2_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+setup.SendCommand(Command='> importCCL "%s"' % ccl_path.replace('\\', '/'))
 
 # -- Solve ---------------------------------------------------------
 system.Update()
@@ -356,7 +355,7 @@ END
 post_ccl_path = os.path.join(project_dir, "lab2_post.ccl")
 with open(post_ccl_path, "w") as f:
     f.write(post_ccl)
-results.SendCommand(Command='> importCCL filename=' + post_ccl_path.replace('\\', '/'))
+results.SendCommand(Command='> importCCL "%s"' % post_ccl_path.replace('\\', '/'))
 
 for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vectors"]:
     fname = name.lower().replace("streamlines", "streamline").replace("vectors", "vector")
@@ -368,15 +367,15 @@ results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
 calc_pairs = [
-    ("maxVal", "Velocity", "FluidDomain", "m s^-1"),
+    ("maxVal", "Velocity", "Default Domain", "m s^-1"),
     ("areaAve", "Velocity", "Inlet", "m s^-1"),
     ("areaAve", "Velocity", "Outlet", "m s^-1"),
-    ("maxVal", "Pressure", "FluidDomain", "Pa"),
-    ("minVal", "Pressure", "FluidDomain", "Pa"),
+    ("maxVal", "Pressure", "Default Domain", "Pa"),
+    ("minVal", "Pressure", "Default Domain", "Pa"),
     ("areaAve", "Pressure", "Inlet", "Pa"),
-    ("maxVal", "Shear Strain Rate", "FluidDomain", "s^-1"),
-    ("maxVal", "Turbulence Kinetic Energy", "FluidDomain", "m^2 s^-2"),
-    ("maxVal", "Turbulence Eddy Frequency", "FluidDomain", "s^-1"),
+    ("maxVal", "Shear Strain Rate", "Default Domain", "s^-1"),
+    ("maxVal", "Turbulence Kinetic Energy", "Default Domain", "m^2 s^-2"),
+    ("maxVal", "Turbulence Eddy Frequency", "Default Domain", "s^-1"),
 ]
 
 # Use CFX-Post Power Syntax (Perl) to evaluate and write CSV with values

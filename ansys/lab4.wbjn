@@ -223,10 +223,9 @@ FLOW: Flow Analysis 1
     END
   END
 
-  DOMAIN: FluidDomain
+  DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
-    Location = B1
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -317,9 +316,6 @@ FLOW: Flow Analysis 1
     END
   END
 
-  COMMAND FILE:
-    Solver Args = -part 12
-  END
 END
 """
 
@@ -327,10 +323,21 @@ ccl_path = os.path.join(project_dir, "lab4_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+setup.SendCommand(Command='> importCCL "%s"' % ccl_path.replace('\\', '/'))
 
 # -- Solve ---------------------------------------------------------
-system.Update()
+# system.Update() may fail on mesh re-check (exit code 255 from mesher)
+# but mesh from GenerateMesh() is valid, so try solver directly as fallback
+try:
+    system.Update()
+except Exception as e:
+    print("system.Update() failed: %s" % str(e))
+    print("Attempting solver with existing mesh...")
+    try:
+        solution_comp = system.GetComponent(Name="Solution")
+        solution_comp.Update()
+    except Exception as e2:
+        print("Solution update also failed: %s" % str(e2))
 
 # -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
@@ -359,7 +366,7 @@ END
 post_path = os.path.join(project_dir, "lab4_post.ccl")
 with open(post_path, "w") as f:
     f.write(post_ccl)
-results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+results.SendCommand(Command='> importCCL "%s"' % post_path.replace('\\', '/'))
 
 for name, fname in [("PressureContour", "pressure"), ("VelocityContour", "velocity")]:
     results.SendCommand(Command='> show %s' % name)

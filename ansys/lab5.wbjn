@@ -204,10 +204,9 @@ FLOW: Flow Analysis 1
     END
   END
 
-  DOMAIN: FluidDomain
+  DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
-    Location = Assembly
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -273,7 +272,7 @@ FLOW: Flow Analysis 1
   END
 
   IMMERSED SOLID: MixerSolid
-    Domain List = FluidDomain
+    Domain List = Default Domain
     Location = MixerBody
     IMMERSED SOLID MOTION:
       Option = Rotating
@@ -313,8 +312,7 @@ FLOW: Flow Analysis 1
     TRANSIENT RESULTS: Transient Results 1
       File Compression Level = Default
       Option = Selected Variables
-      Output Variables List = Pressure, Velocity, Turbulence Kinetic Energy, \
-        Turbulence Eddy Frequency, Wall Shear
+      Output Variables List = Pressure, Velocity, Turbulence Kinetic Energy, Turbulence Eddy Frequency, Wall Shear
       OUTPUT FREQUENCY:
         Option = Every Timestep
         Timestep Interval = 24
@@ -328,7 +326,7 @@ ccl_path = os.path.join(project_dir, "lab5_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/') + ', mode = replace')
+setup.SendCommand(Command='> importCCL "%s"' % ccl_path.replace('\\', '/'))
 
 # -- Solve ---------------------------------------------------------
 system.Update()
@@ -378,7 +376,7 @@ END
 post_path = os.path.join(project_dir, "lab5_post.ccl")
 with open(post_path, "w") as f:
     f.write(post_ccl)
-results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+results.SendCommand(Command='> importCCL "%s"' % post_path.replace('\\', '/'))
 
 for name, fname in [("VelocityContour", "velocity"), ("PressureContour", "pressure"),
                      ("SSRContour", "ssr"), ("TKEContour", "tke"), ("TEFContour", "tef")]:
