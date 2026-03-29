@@ -86,7 +86,7 @@ top_faces = []
 wall_faces = []
 bottom_faces = []
 for f in vessel_faces:
-    z = f.Centroid.Z
+    z = f.Centroid[2]
     if z > SHELL_H - 5:
         top_faces.append(f)
     elif z < 0:
@@ -119,9 +119,7 @@ mesh.GenerateMesh()
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 print("Mesh script done")
 """
 

@@ -73,12 +73,12 @@ for body in geo.GetChildren(DataModelObjectCategory.Body, True):
 print("Total faces: %d" % len(all_faces))
 for f in all_faces:
     print("  Face: centroid=(%s, %s, %s) area=%s" % (
-        f.Centroid.X, f.Centroid.Y, f.Centroid.Z, f.Area))
+        f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
 
 # Inlet: circular face at X=0 (pipe start)
-inlet_faces = [f for f in all_faces if abs(f.Centroid.X) < 0.5]
+inlet_faces = [f for f in all_faces if abs(f.Centroid[0]) < 0.5]
 # Outlet: circular face at X=300 (pipe end)
-outlet_faces = [f for f in all_faces if abs(f.Centroid.X - 300) < 0.5]
+outlet_faces = [f for f in all_faces if abs(f.Centroid[0] - 300) < 0.5]
 # Wall: all other faces (cylindrical pipe wall + cone surface)
 wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_faces]
 
@@ -118,7 +118,7 @@ inflation.FirstLayerHeight = Quantity("0.3 [mm]")
 
 # Refinement around cone (faces with centroid X between 100..200mm)
 cone_faces = [f for f in wall_faces
-              if 100 < f.Centroid.X < 200 and f not in inlet_faces and f not in outlet_faces]
+              if 100 < f.Centroid[0] < 200 and f not in inlet_faces and f not in outlet_faces]
 if cone_faces:
     sizing = mesh.AddSizing()
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
@@ -132,9 +132,7 @@ mesh.GenerateMesh()
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 print("Mesh script done")
 """
 

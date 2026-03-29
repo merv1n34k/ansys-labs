@@ -99,13 +99,13 @@ def get_faces(body):
 def find_nozzle_face(faces, target_z, max_area):
     candidates = []
     for f in faces:
-        if (f.Centroid.X > NOZZLE_END_R - 5
-                and abs(f.Centroid.Y) < 5
-                and abs(f.Centroid.Z - target_z) < 30
+        if (f.Centroid[0] > NOZZLE_END_R - 5
+                and abs(f.Centroid[1]) < 5
+                and abs(f.Centroid[2] - target_z) < 30
                 and f.Area < max_area):
             candidates.append(f)
     if candidates:
-        candidates.sort(key=lambda f: f.Centroid.X, reverse=True)
+        candidates.sort(key=lambda f: f.Centroid[0], reverse=True)
         return [candidates[0]]
     return []
 
@@ -156,9 +156,7 @@ mesh.GenerateMesh()
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 print("Mesh script done")
 """
 

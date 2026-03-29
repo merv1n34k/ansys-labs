@@ -87,9 +87,7 @@ mesh.GenerateMesh()
 mesh.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 
 # -- Get faces via geometry API --
 def get_faces(body):
@@ -103,8 +101,8 @@ print("Vessel faces: %d" % len(vessel_faces))
 
 inner_faces = []
 for f in vessel_faces:
-    r = math.sqrt(f.Centroid.X**2 + f.Centroid.Y**2)
-    z = f.Centroid.Z
+    r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
+    z = f.Centroid[2]
     if r < 248.5 and z < 1001:
         inner_faces.append(f)
 
@@ -165,16 +163,12 @@ SOLN.EvaluateAllResults()
 TOT_DEF.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "deformation.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 
 EQV_STRS.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "stress.png"),
-    GraphicsImageExportFormat.PNG,
-    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
-)
+    GraphicsImageExportFormat.PNG)
 
 # -- Write results CSV --
 max_def = TOT_DEF.Maximum
