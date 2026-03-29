@@ -60,21 +60,13 @@ geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Open Mechanical editor -----------------------------------------
-print("Opening Mechanical editor...")
-model_container = system.GetContainer(ComponentName="Model")
-model_container.Edit(Interactive=True)
-print("Mechanical editor opened successfully")
-
-# -- Mechanical script (runs inside Mechanical via SendCommand) -----
-# Model, ExtAPI, Quantity, etc. live in Mechanical namespace,
-# not in the Workbench journal. Use SendCommand to execute.
-mech_script = """
-import os
-import math
-
-results_dir = r'{results_dir}'
-
+# -- Write Mechanical script to file --------------------------------
+# Model, ExtAPI, Quantity etc. only exist inside Mechanical, not in
+# the Workbench journal namespace. We write the script to a .py file
+# and try multiple execution methods.
+mech_path = os.path.join(project_dir, "lab1_mech.py")
+mech_header = "import os\nimport math\n\nresults_dir = r'%s'\n" % results_dir.replace("\\", "/")
+mech_body = r"""
 # -- Assign material to all bodies --
 all_bodies = list(Model.Geometry.GetChildren(
     DataModelObjectCategory.Body, True
@@ -191,15 +183,82 @@ except:
 
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
-    f.write("Parameter,Value,Unit\\n")
-    f.write("Max Total Deformation,%s,mm\\n" % max_def_val)
-    f.write("Max Equivalent Stress,%s,MPa\\n" % max_stress_val)
+    f.write("Parameter,Value,Unit\n")
+    f.write("Max Total Deformation,%s,mm\n" % max_def_val)
+    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
 
 print("Lab 1 complete. Results in: " + results_dir)
 print("Max Deformation: %s mm" % max_def_val)
 print("Max Stress: %s MPa" % max_stress_val)
-""".format(results_dir=results_dir.replace("\\", "/"))
+"""
 
-model_container.SendCommand(Language="Python", Command=mech_script)
+mech_script = mech_header + mech_body
+with open(mech_path, "w") as f:
+    f.write(mech_script)
+print("Mechanical script written to: " + mech_path)
+
+# -- Open Mechanical editor -----------------------------------------
+print("Opening Mechanical editor...")
+model_container = system.GetContainer(ComponentName="Model")
+model_container.Edit(Interactive=True)
+print("Mechanical editor opened successfully")
+
+# -- Discover container API -----------------------------------------
+print("Container type: %s" % type(model_container).__name__)
+try:
+    attrs = [a for a in dir(model_container) if not a.startswith('_')]
+    print("Container attrs: %s" % ", ".join(attrs))
+except Exception as e:
+    print("dir() failed: %s" % str(e))
+
+# -- Try multiple SendCommand approaches ----------------------------
+
+# Approach 1: Language="Python" with inline code
+try:
+    print("[1] SendCommand(Language='Python', Command='print(42)')...")
+    model_container.SendCommand(Language="Python", Command="print(42)")
+    print("[1] OK")
+except Exception as e:
+    print("[1] FAIL: %s: %s" % (type(e).__name__, str(e)))
+
+# Approach 2: No Language param (might default to APDL)
+try:
+    print("[2] SendCommand(Command='/COM,HELLO')...")
+    model_container.SendCommand(Command="/COM,HELLO")
+    print("[2] OK")
+except Exception as e:
+    print("[2] FAIL: %s: %s" % (type(e).__name__, str(e)))
+
+# Approach 3: Positional arg
+try:
+    print("[3] SendCommand('print(42)')...")
+    model_container.SendCommand("print(42)")
+    print("[3] OK")
+except Exception as e:
+    print("[3] FAIL: %s: %s" % (type(e).__name__, str(e)))
+
+# Approach 4: ScriptByName or RunPythonScript (if they exist)
+for method_name in ["RunPythonScript", "RunScript", "ScriptByName",
+                     "ExecuteScript", "ExecutePythonCode"]:
+    if hasattr(model_container, method_name):
+        print("Found method: %s" % method_name)
+
+# Approach 5: Check Edit() return value
+try:
+    print("[5] Checking Edit() return type...")
+    model_container.Exit()
+    ret = model_container.Edit(Interactive=True)
+    print("[5] Edit() returned: type=%s value=%s" % (type(ret).__name__, str(ret)))
+    if ret is not None:
+        ret_attrs = [a for a in dir(ret) if not a.startswith('_')]
+        print("[5] Return attrs: %s" % ", ".join(ret_attrs))
+except Exception as e:
+    print("[5] FAIL: %s: %s" % (type(e).__name__, str(e)))
+
+print("")
+print("=== DIAGNOSTIC COMPLETE ===")
+print("Mechanical script file: %s" % mech_path)
+print("If no approach worked, paste the script into Mechanical's")
+print("scripting console (Automation tab) to run it manually.")
 
 Save(Overwrite=True)
