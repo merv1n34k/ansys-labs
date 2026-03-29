@@ -20,23 +20,23 @@ from cadquery import Vector
 
 from common import make_vessel_inner_volume, R_IN, SHELL_H
 
-# Mixer dimensions (mm)
-TUBE_D = 20.0
+# Mixer dimensions (mm) — sized to fit inside vessel (≤10% of vessel volume)
+TUBE_D = 15.0
 TUBE_R = TUBE_D / 2
-ARM_RADIUS = 220.0
-CORNER_R = 60.0
-AXLE_D = 30.0
+ARM_RADIUS = 100.0
+CORNER_R = 20.0
+AXLE_D = 20.0
 AXLE_R = AXLE_D / 2
-WEDGE = 30.0  # axle extension below the U bottom bar
+WEDGE = 20.0  # axle extension below the U bottom bar
 
-# Vertical layout
-ARM_BOTTOM_Z = -math.sqrt(R_IN**2 - ARM_RADIUS**2) + 40
-ARM_TOP_Z = 800.0
+# Vertical layout — keep mixer well inside the vessel cylinder
+ARM_BOTTOM_Z = 150.0
+ARM_TOP_Z = 700.0
 ARM_LENGTH = ARM_TOP_Z - ARM_BOTTOM_Z
 
-# Axle: rounded bottom extends below bar, flat top, total >= 2x arm length
+# Axle: rounded bottom extends below bar, flat top, stays within vessel
 AXLE_BOTTOM_Z = ARM_BOTTOM_Z - WEDGE
-AXLE_TOP_Z = AXLE_BOTTOM_Z + 2.0 * ARM_LENGTH
+AXLE_TOP_Z = 900.0
 
 
 def make_anchor_mixer():

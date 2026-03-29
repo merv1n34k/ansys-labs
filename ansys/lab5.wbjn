@@ -204,9 +204,10 @@ FLOW: Flow Analysis 1
     END
   END
 
-  DOMAIN: Default Domain
+  DOMAIN: FluidDomain
     Coord Frame = Coord 0
     Domain Type = Fluid
+    Location = Assembly
     DOMAIN MODELS:
       BUOYANCY MODEL:
         Option = Non Buoyant
@@ -272,7 +273,7 @@ FLOW: Flow Analysis 1
   END
 
   IMMERSED SOLID: MixerSolid
-    Domain List = Default Domain
+    Domain List = FluidDomain
     Location = MixerBody
     IMMERSED SOLID MOTION:
       Option = Rotating
@@ -320,10 +321,6 @@ FLOW: Flow Analysis 1
       END
     END
   END
-
-  COMMAND FILE:
-    Solver Args = -part 4
-  END
 END
 """
 
@@ -331,7 +328,7 @@ ccl_path = os.path.join(project_dir, "lab5_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/') + ', mode = replace')
 
 # -- Solve ---------------------------------------------------------
 system.Update()

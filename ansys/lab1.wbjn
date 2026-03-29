@@ -187,11 +187,17 @@ except:
     max_def_val = max_def
     max_stress_val = max_stress
 
+# Solver returns stress in Pa; convert to MPa
+try:
+    max_stress_mpa = float(max_stress_val) / 1.0e6
+except:
+    max_stress_mpa = max_stress_val
+
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
     f.write("Parameter,Value,Unit\n")
     f.write("Max Total Deformation,%s,mm\n" % max_def_val)
-    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
+    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_mpa)
 
 # Write success marker
 open(os.path.join(results_dir, "done.txt"), "w").write("Lab 1 complete")

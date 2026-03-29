@@ -368,15 +368,15 @@ results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
 calc_pairs = [
-    ("maxVal", "Velocity", "", "m s^-1"),
+    ("maxVal", "Velocity", "FluidDomain", "m s^-1"),
     ("areaAve", "Velocity", "Inlet", "m s^-1"),
     ("areaAve", "Velocity", "Outlet", "m s^-1"),
-    ("maxVal", "Pressure", "", "Pa"),
-    ("minVal", "Pressure", "", "Pa"),
+    ("maxVal", "Pressure", "FluidDomain", "Pa"),
+    ("minVal", "Pressure", "FluidDomain", "Pa"),
     ("areaAve", "Pressure", "Inlet", "Pa"),
-    ("maxVal", "Shear Strain Rate", "", "s^-1"),
-    ("maxVal", "Turbulence Kinetic Energy", "", "m^2 s^-2"),
-    ("maxVal", "Turbulence Eddy Frequency", "", "s^-1"),
+    ("maxVal", "Shear Strain Rate", "FluidDomain", "s^-1"),
+    ("maxVal", "Turbulence Kinetic Energy", "FluidDomain", "m^2 s^-2"),
+    ("maxVal", "Turbulence Eddy Frequency", "FluidDomain", "s^-1"),
 ]
 
 # Use CFX-Post Power Syntax (Perl) to evaluate and write CSV with values
@@ -386,10 +386,9 @@ power_lines = [
     '!my $v;',
 ]
 for func, var, loc, unit in calc_pairs:
-    loc_str = "@%s" % loc if loc else ""
     power_lines.append(
-        "!$v = evaluate('%s(%s)%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
-        % (func, var, loc_str, func, var, loc or "Domain", unit))
+        "!$v = evaluate('%s(%s)@%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
+        % (func, var, loc, func, var, loc, unit))
 power_lines.append('!close($fh);')
 
 results.SendCommand(Command='\n'.join(power_lines))

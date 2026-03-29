@@ -115,7 +115,16 @@ ns_wall.Location = sel
 
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("5 [mm]")
-# Do NOT call GenerateMesh() here -- let system.Update() mesh once
+mesh.GenerateMesh()
+
+mesh.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG)
 print("Mesh script done")
 """
 
