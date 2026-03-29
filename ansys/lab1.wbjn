@@ -94,12 +94,25 @@ Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
     GraphicsImageExportFormat.PNG)
 
-# -- Get faces via geometry API --
+# -- Get faces --
+# Tree faces (GetChildren) are compatible with SelectionInfo.Entities.
+# GeoData faces (GetGeoBody().Faces) may silently fail when assigned to SelectionInfo.
 def get_faces(body):
     try:
-        return list(body.GetGeoBody().Faces)
-    except:
-        return list(body.Faces)
+        faces = list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
+        if faces:
+            _ = faces[0].Centroid
+            print("Tree faces for '%s': %d" % (body.Name, len(faces)))
+            return faces
+    except Exception as e:
+        print("Tree faces failed for '%s': %s" % (body.Name, e))
+    try:
+        faces = list(body.GetGeoBody().Faces)
+        print("GeoData faces for '%s': %d (fallback)" % (body.Name, len(faces)))
+        return faces
+    except Exception as e2:
+        print("GeoData faces also failed for '%s': %s" % (body.Name, e2))
+    return []
 
 R_OUT = 250.0
 R_IN = 247.9
@@ -129,7 +142,6 @@ if pad_body:
     for f in pad_faces:
         r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
         print("  Pad face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
-        # Outer pad faces: centroid R ~ R_OUT + PAD_W = 300mm
         if r > R_OUT + PAD_W * 0.8:
             pad_outer_faces.append(f)
     print("Pad outer faces for fixed support: %d" % len(pad_outer_faces))
@@ -142,6 +154,10 @@ ns_pressure.Name = "InnerFaces"
 sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
 sel.Entities = inner_faces
 ns_pressure.Location = sel
+try:
+    ns_pressure.Generate()
+except:
+    pass
 
 ns_pads = None
 if pad_outer_faces:
@@ -150,8 +166,12 @@ if pad_outer_faces:
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Entities = pad_outer_faces
     ns_pads.Location = sel
+    try:
+        ns_pads.Generate()
+    except:
+        pass
 
-# -- Boundary Conditions (all via WB API, no APDL) --
+# -- Boundary Conditions (all via WB Mechanical API) --
 analysis = Model.Analyses[0]
 
 # 1. Pressure on inner faces
@@ -161,6 +181,7 @@ PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
 print("BC: Pressure 1.1 MPa on %d inner faces" % len(inner_faces))
 
 # 2. Fixed support on pad outer faces
+FIXED = None
 if ns_pads:
     FIXED = analysis.AddFixedSupport()
     FIXED.Location = ns_pads
@@ -168,54 +189,50 @@ if ns_pads:
 else:
     print("ERROR: no pad outer faces for fixed support!")
 
-# 3. Gravity (Z-down)
+# 3. Gravity via AddAcceleration (positive Z = inertial force in -Z = gravity down)
+ACCEL = None
 try:
     ACCEL = analysis.AddAcceleration()
     ACCEL.DefineBy = LoadDefineBy.Components
-    ACCEL.XComponent.Output.DiscreteValues = [Quantity("0 [mm s^-2]")]
-    ACCEL.YComponent.Output.DiscreteValues = [Quantity("0 [mm s^-2]")]
-    ACCEL.ZComponent.Output.DiscreteValues = [Quantity("-9806.6 [mm s^-2]")]
-    print("BC: Gravity Z=-9806.6 mm/s^2 via AddAcceleration")
+    ACCEL.ZComponent.Output.DiscreteValues = [Quantity("9806.6 [mm sec^-1 sec^-1]")]
+    print("BC: Acceleration Z=+9806.6 mm/s^2 (gravity -Z)")
 except Exception as e:
-    print("AddAcceleration failed: %s, trying StandardEarthGravity" % e)
+    print("AddAcceleration failed: %s, trying AddEarthGravity" % e)
     try:
-        ACCEL = analysis.AddStandardEarthGravity()
-        print("BC: StandardEarthGravity applied (check direction!)")
+        ACCEL = analysis.AddEarthGravity()
+        try:
+            ACCEL.Direction = GravityOrientationType.NegativeZDirection
+        except:
+            pass
+        print("BC: Earth gravity applied")
     except Exception as e2:
         print("ERROR: could not add gravity: %s" % e2)
 
-# 4. Thermal load: reference 22C, applied 75C
-# Set reference temperature
-ref_temp_set = False
-for attr in ["EnvironmentTemperature"]:
-    try:
-        setattr(analysis, attr, Quantity("22 [C]"))
-        print("Reference temp: 22 C via analysis.%s" % attr)
-        ref_temp_set = True
-        break
-    except:
-        pass
-if not ref_temp_set:
-    try:
-        analysis.AnalysisSettings.ReferenceTemperature = Quantity("22 [C]")
-        print("Reference temp: 22 C via AnalysisSettings")
-        ref_temp_set = True
-    except:
-        pass
-if not ref_temp_set:
-    print("WARNING: could not set reference temp via API, using APDL TREF")
-    cmd = analysis.AddCommandSnippet()
-    cmd.Input = "TREF,22"
-
-# Apply uniform temperature
+# 4. Thermal: reference temp 22C, body temp 75C
 try:
-    TEMP = analysis.AddThermalCondition()
-    TEMP.Magnitude.Output.DiscreteValues = [Quantity("75 [C]")]
-    print("BC: Thermal condition 75 C")
+    analysis.EnvironmentTemperature = Quantity("22 [C]")
+    print("Reference temperature: 22 C")
 except Exception as e:
-    print("AddThermalCondition failed: %s, trying APDL BF" % e)
-    cmd = analysis.AddCommandSnippet()
-    cmd.Input = "NSEL,ALL\nBF,ALL,TEMP,75\nNSEL,ALL\nALLS"
+    print("EnvironmentTemperature failed: %s" % e)
+
+TEMP = analysis.AddThermalCondition()
+body_sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+body_sel.Entities = all_bodies
+TEMP.Location = body_sel
+TEMP.Magnitude.Output.DiscreteValues = [Quantity("75 [C]")]
+print("BC: Thermal condition 75 C on %d bodies" % len(all_bodies))
+
+# -- Diagnostics: check BC ObjectState --
+print("--- BC Diagnostics ---")
+for bc_name, bc_obj in [("Pressure", PRESSURE), ("FixedSupport", FIXED),
+                         ("Acceleration", ACCEL), ("Thermal", TEMP)]:
+    if bc_obj is None:
+        print("  %s: NOT CREATED" % bc_name)
+        continue
+    try:
+        print("  %s: state=%s" % (bc_name, bc_obj.ObjectState))
+    except:
+        print("  %s: could not read state" % bc_name)
 
 # -- Result objects --
 SOLN = analysis.Solution

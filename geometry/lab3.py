@@ -1,12 +1,12 @@
 """Lab 3 — CFX CHT geometry, Variant 13.
 
-Three-body assembly for conjugate heat transfer simulation:
-  1. vessel_fluid — vessel inner volume with coil envelope subtracted
-  2. coil_solid_copper — helical copper tube wall
-  3. coil_fluid — fluid inside the coil tube
+Simplified snake/serpentine pipe heat exchanger:
+  1. vessel_fluid — vessel inner volume with pipe envelope subtracted
+  2. coil_solid_copper — copper pipe wall (serpentine pattern)
+  3. coil_fluid — fluid inside the pipe
 
-All inlets/outlets are on the same side (0° / +X direction).
-Coil is a single sweep along: radial arm + helix + radial arm.
+Snake pipe: 6 horizontal passes in the XZ plane at Y=0,
+connected by semicircular U-bends. Inlet/outlet both on +X side.
 """
 
 import math
@@ -14,113 +14,76 @@ from pathlib import Path
 
 import cadquery as cq
 from cadquery import Vector
-from OCP.GC import GC_MakeArcOfCircle
-from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
-from OCP.gp import gp_Pnt
+from OCP.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell
+from OCP.gp import gp_Dir
 
 from common import make_vessel_inner_volume, R_IN, R_OUT, SHELL_H, WALL
 
-# Coil parameters (mm)
-COIL_HELIX_RADIUS = 180.0
-COIL_PITCH = 80.0
-COIL_TURNS = 8
-COIL_HEIGHT = COIL_PITCH * COIL_TURNS  # 640 mm
-
+# Pipe parameters (mm)
 TUBE_OD = 25.0
 TUBE_WALL = 2.0
-TUBE_ID = TUBE_OD - 2 * TUBE_WALL  # 21 mm
+TUBE_ID = TUBE_OD - 2 * TUBE_WALL
 TUBE_OR = TUBE_OD / 2.0
 TUBE_IR = TUBE_ID / 2.0
 
-# Center coil vertically in vessel
-COIL_Z_OFFSET = (SHELL_H - COIL_HEIGHT) / 2.0  # 180 mm
+# Snake layout
+N_PASSES = 6
+SPACING = 100.0
+START_Z = 200.0
+X_LEFT = -150.0
+X_RIGHT = 150.0
+BEND_R = SPACING / 2.0
 
-# Nozzle parameters — all at angle 0° (+X direction)
+# Nozzle — pipe inlet/outlet arms extend outside vessel wall
 NOZZLE_LEN = 60.0
-NOZZLE_END_R = R_OUT + NOZZLE_LEN
-VESSEL_NOZZLE_R = 20.0
-VESSEL_NOZZLE_Z_TOP = SHELL_H - 50.0
-VESSEL_NOZZLE_Z_BOT = 50.0
+NOZZLE_END_X = R_OUT + NOZZLE_LEN
 
-# Coil arm 90° bend
-R_BEND = 50.0
-SIN45 = math.sin(math.pi / 4)
-EAT_ANGLE = 15.0  # degrees trimmed from each helix end
+# Vessel nozzles
+VESSEL_NZ_R = 20.0
+VESSEL_NZ_TOP = SHELL_H - 50.0
+VESSEL_NZ_BOT = 50.0
 
 
-def _make_arc_edge(start, mid, end):
-    """Create a circular arc edge through three points."""
-    arc = GC_MakeArcOfCircle(
-        gp_Pnt(*start.toTuple()),
-        gp_Pnt(*mid.toTuple()),
-        gp_Pnt(*end.toTuple()),
-    ).Value()
-    return cq.Edge(BRepBuilderAPI_MakeEdge(arc).Edge())
+def _make_snake_wire():
+    """Build serpentine pipe path: inlet arm + 6 passes + U-bends + outlet arm."""
+    pb = cq.Workplane("XZ").moveTo(NOZZLE_END_X, START_Z)
 
+    # Inlet arm: from nozzle face to first run start
+    pb = pb.lineTo(X_RIGHT, START_Z)
 
-def _make_coil_wire():
-    """Build coil path: straight +X arm + arc + trimmed helix + arc + straight +X arm.
+    z = START_Z
+    for i in range(N_PASSES):
+        if i % 2 == 0:
+            pb = pb.lineTo(X_LEFT, z)
+            if i < N_PASSES - 1:
+                pb = pb.threePointArc(
+                    (X_LEFT - BEND_R, z + BEND_R),
+                    (X_LEFT, z + SPACING),
+                )
+        else:
+            pb = pb.lineTo(X_RIGHT, z)
+            if i < N_PASSES - 1:
+                pb = pb.threePointArc(
+                    (X_RIGHT + BEND_R, z + BEND_R),
+                    (X_RIGHT, z + SPACING),
+                )
+        if i < N_PASSES - 1:
+            z += SPACING
 
-    All arms at Y=0 going +X — nozzle faces align vertically with vessel nozzles.
-    Helix eaten by EAT_ANGLE at each end. Arcs curve in opposite Y directions
-    (inlet above, outlet below X-axis). Arc angle = 90° - EAT_ANGLE.
-    Arc radius = R_H * sin(θ) / (1 - sin(θ)), derived from the constraint
-    that arm junction must be at Y=0 with tangent +X.
-    """
-    eat_rad = math.radians(EAT_ANGLE)
-    eat_h = (EAT_ANGLE / 360.0) * COIL_PITCH
+    # Outlet arm: last run ended at X_RIGHT (N_PASSES-1=5 is odd)
+    pb = pb.lineTo(NOZZLE_END_X, z)
 
-    trimmed_height = COIL_HEIGHT - 2 * eat_h
-    helix = cq.Wire.makeHelix(
-        pitch=COIL_PITCH,
-        height=trimmed_height,
-        radius=COIL_HELIX_RADIUS,
-    )
-    helix = helix.rotate((0, 0, 0), (0, 0, 1), EAT_ANGLE)
-    helix = helix.moved(cq.Location(Vector(0, 0, COIL_Z_OFFSET + eat_h)))
-
-    h_start = helix.startPoint()
-    h_end = helix.endPoint()
-
-    s = math.sin(eat_rad)
-    rho = COIL_HELIX_RADIUS * s / (1 - s)
-    x_j = COIL_HELIX_RADIUS * math.cos(eat_rad) / (1 - s)
-
-    # --- INLET (bottom, helix start at +EAT_ANGLE) ---
-    # Arc center above X-axis: (x_j, +rho)
-    # CW from arm junction (270° from center) to helix start (180°+θ from center)
-    mid_a_in = math.radians(225 + EAT_ANGLE / 2)
-    M_in = Vector(x_j + rho * math.cos(mid_a_in), rho + rho * math.sin(mid_a_in), h_start.z)
-    arc_in = _make_arc_edge(Vector(x_j, 0, h_start.z), M_in, h_start)
-    line_in = cq.Edge.makeLine(Vector(NOZZLE_END_R, 0, h_start.z), Vector(x_j, 0, h_start.z))
-
-    # --- OUTLET (top, helix end at -EAT_ANGLE) ---
-    # Arc center below X-axis: (x_j, -rho)
-    # CW from helix end (180°-θ from center) to arm junction (90° from center)
-    mid_a_out = math.radians(135 - EAT_ANGLE / 2)
-    M_out = Vector(x_j + rho * math.cos(mid_a_out), -rho + rho * math.sin(mid_a_out), h_end.z)
-    arc_out = _make_arc_edge(h_end, M_out, Vector(x_j, 0, h_end.z))
-    line_out = cq.Edge.makeLine(Vector(x_j, 0, h_end.z), Vector(NOZZLE_END_R, 0, h_end.z))
-
-    all_edges = [line_in, arc_in] + list(helix.Edges()) + [arc_out, line_out]
-    return cq.Wire.assembleEdges(all_edges)
+    return pb.wire().val()
 
 
 def _sweep_along(radius, wire):
-    """Sweep a circular cross-section along a composite wire.
-
-    Uses OCC BRepOffsetAPI_MakePipeShell with binormal mode (Z-axis reference)
-    to avoid Frenet frame degeneracy on straight segments.
-    """
-    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell
-    from OCP.gp import gp_Dir
-
+    """Sweep a circular cross-section along a wire using binormal mode."""
     start = wire.startPoint()
     tangent = wire.tangentAt(0)
     circle = cq.Wire.makeCircle(radius, center=start, normal=tangent)
 
     builder = BRepOffsetAPI_MakePipeShell(wire.wrapped)
-    builder.SetMode(gp_Dir(0, 0, 1))
+    builder.SetMode(gp_Dir(0, 1, 0))
     builder.Add(circle.wrapped)
     builder.Build()
     builder.MakeSolid()
@@ -128,41 +91,39 @@ def _sweep_along(radius, wire):
 
 
 def _make_vessel_nozzle(z, nozzle_r):
-    """Vessel nozzle stub at angle 0° (+X), from inside vessel wall to outside."""
-    start_r = R_IN - 5
-    length = NOZZLE_END_R - start_r
-    origin = Vector(start_r, 0, z)
+    """Vessel nozzle stub at +X direction, from inside wall to outside."""
+    start_x = R_IN - 5
+    length = NOZZLE_END_X - start_x
+    origin = Vector(start_x, 0, z)
     plane = cq.Plane(origin=origin, normal=Vector(1, 0, 0))
     return cq.Workplane(plane).circle(nozzle_r).extrude(length)
 
 
 def build():
-    """Build and return (vessel_fluid, coil_solid, coil_fluid)."""
-    coil_wire = _make_coil_wire()
+    wire = _make_snake_wire()
 
-    # Single sweep for outer and inner — no unions needed
-    outer_solid = _sweep_along(TUBE_OR, coil_wire)
-    inner_solid = _sweep_along(TUBE_IR, coil_wire)
+    outer_solid = _sweep_along(TUBE_OR, wire)
+    inner_solid = _sweep_along(TUBE_IR, wire)
 
     coil_solid = cq.Workplane("XY").newObject([outer_solid])
     coil_solid = coil_solid.cut(cq.Workplane("XY").newObject([inner_solid]))
 
     coil_fluid = cq.Workplane("XY").newObject([inner_solid])
 
-    # Vessel fluid volume with nozzles
+    # Vessel fluid with nozzles
     vessel_fluid = make_vessel_inner_volume()
-    vessel_noz_top = _make_vessel_nozzle(VESSEL_NOZZLE_Z_TOP, VESSEL_NOZZLE_R)
-    vessel_noz_bot = _make_vessel_nozzle(VESSEL_NOZZLE_Z_BOT, VESSEL_NOZZLE_R)
+    vessel_noz_top = _make_vessel_nozzle(VESSEL_NZ_TOP, VESSEL_NZ_R)
+    vessel_noz_bot = _make_vessel_nozzle(VESSEL_NZ_BOT, VESSEL_NZ_R)
     vessel_fluid = vessel_fluid.union(vessel_noz_top).union(vessel_noz_bot)
 
-    # Subtract coil envelope from vessel fluid
+    # Subtract pipe envelope from vessel fluid
     coil_envelope = cq.Workplane("XY").newObject([outer_solid])
     vessel_fluid = vessel_fluid.cut(coil_envelope)
 
     return vessel_fluid, coil_solid, coil_fluid
 
 
-print("Building Lab 3 geometry (Variant 13) ...")
+print("Building Lab 3 geometry (snake pipe, Variant 13) ...")
 vessel_fluid, coil_solid, coil_fluid = build()
 
 assy = cq.Assembly()
@@ -176,13 +137,11 @@ out_path = out_dir / "lab3.step"
 
 assy.export(str(out_path))
 
-coil_wire = _make_coil_wire()
-sp = coil_wire.startPoint()
-ep = coil_wire.endPoint()
+END_Z = START_Z + (N_PASSES - 1) * SPACING
 print(f"Exported assembly (3 bodies) -> {out_path}")
-print(f"Nozzle layout (all at 0° / +X side):")
-print(f"  Vessel inlet:  Z={VESSEL_NOZZLE_Z_TOP:.0f} mm")
-print(f"  Vessel outlet: Z={VESSEL_NOZZLE_Z_BOT:.0f} mm")
-print(f"  Coil inlet:    Z={COIL_Z_OFFSET:.0f} mm (arm start)")
-print(f"  Coil outlet:   Z={COIL_Z_OFFSET + COIL_HEIGHT:.0f} mm (arm end)")
-print(f"  Nozzle end faces at X ≈ {NOZZLE_END_R:.0f} mm (select by max X)")
+print(f"Snake pipe: {N_PASSES} passes, Z={START_Z:.0f}-{END_Z:.0f} mm")
+print(f"  X range: [{X_LEFT:.0f}, {X_RIGHT:.0f}] mm, bend R={BEND_R:.0f} mm")
+print(f"  Pipe inlet face:  X={NOZZLE_END_X:.0f}, Z={START_Z:.0f}")
+print(f"  Pipe outlet face: X={NOZZLE_END_X:.0f}, Z={END_Z:.0f}")
+print(f"  Vessel inlet:  Z={VESSEL_NZ_TOP:.0f} mm")
+print(f"  Vessel outlet: Z={VESSEL_NZ_BOT:.0f} mm")

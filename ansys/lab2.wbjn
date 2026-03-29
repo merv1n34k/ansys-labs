@@ -60,9 +60,20 @@ mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
 mesh_body = r"""
 def get_faces(body):
     try:
-        return list(body.GetGeoBody().Faces)
-    except:
-        return list(body.Faces)
+        faces = list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
+        if faces:
+            _ = faces[0].Centroid
+            print("Tree faces for '%s': %d" % (body.Name, len(faces)))
+            return faces
+    except Exception as e:
+        print("Tree faces failed for '%s': %s" % (body.Name, e))
+    try:
+        faces = list(body.GetGeoBody().Faces)
+        print("GeoData faces for '%s': %d (fallback)" % (body.Name, len(faces)))
+        return faces
+    except Exception as e2:
+        print("GeoData faces also failed for '%s': %s" % (body.Name, e2))
+    return []
 
 geo = Model.Geometry
 all_faces = []
@@ -293,10 +304,15 @@ ccl_path = os.path.join(project_dir, "lab2_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL "%s"' % ccl_path.replace('\\', '/'))
+# Send CCL directly (importCCL file command is broken in WB 2024 R1)
+setup.SendCommand(Command=ccl_content)
 
 # -- Solve ---------------------------------------------------------
-system.Update()
+# Explicit component updates instead of system.Update()
+setup_comp = system.GetComponent(Name="Setup")
+setup_comp.Update()
+solution_comp = system.GetComponent(Name="Solution")
+solution_comp.Update()
 
 # -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
@@ -355,7 +371,7 @@ END
 post_ccl_path = os.path.join(project_dir, "lab2_post.ccl")
 with open(post_ccl_path, "w") as f:
     f.write(post_ccl)
-results.SendCommand(Command='> importCCL "%s"' % post_ccl_path.replace('\\', '/'))
+results.SendCommand(Command=post_ccl)
 
 for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vectors"]:
     fname = name.lower().replace("streamlines", "streamline").replace("vectors", "vector")

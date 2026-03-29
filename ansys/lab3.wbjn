@@ -2,9 +2,11 @@
 # Run: runwb2 -R ansys/lab3.wbjn
 #
 # Geometry: 3-body STEP assembly (vessel_fluid, coil_solid_copper, coil_fluid).
+# Snake pipe heat exchanger: 6 horizontal passes in XZ plane.
 # Domain interfaces are auto-detected by CFX-Pre from coincident mesh faces.
 
 import os
+import math
 
 # -- Paths ----------------------------------------------------------
 root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
@@ -17,16 +19,14 @@ for d in [project_dir, results_dir]:
         os.makedirs(d)
 
 # -- Geometry constants (from lab3.py) for face detection ----------
-NOZZLE_END_R = 310.0
+NOZZLE_END_X = 310.0
 VESSEL_NZ_TOP = 950.0
 VESSEL_NZ_BOT = 50.0
 VESSEL_NZ_R = 20.0
 TUBE_OR = 12.5
 TUBE_IR = 10.5
-COIL_Z_OFFSET = 180.0
-COIL_HEIGHT = 640.0
-COIL_ARM_BOT_Z = COIL_Z_OFFSET + 3.3
-COIL_ARM_TOP_Z = COIL_Z_OFFSET + COIL_HEIGHT - 3.3
+PIPE_INLET_Z = 200.0
+PIPE_OUTLET_Z = 700.0
 
 # -- Create CFX system ---------------------------------------------
 template = None
@@ -66,15 +66,15 @@ geom_comp.Update()
 
 # -- Write mesh script to .py file ---------------------------------
 mesh_path = os.path.join(project_dir, "lab3_mesh.py")
-mesh_header = "import os\n\n"
+mesh_header = "import os\nimport math\n\n"
 mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
-mesh_header += "NOZZLE_END_R = %s\n" % NOZZLE_END_R
+mesh_header += "NOZZLE_END_X = %s\n" % NOZZLE_END_X
 mesh_header += "VESSEL_NZ_TOP = %s\n" % VESSEL_NZ_TOP
 mesh_header += "VESSEL_NZ_BOT = %s\n" % VESSEL_NZ_BOT
 mesh_header += "VESSEL_NZ_R = %s\n" % VESSEL_NZ_R
 mesh_header += "TUBE_IR = %s\n" % TUBE_IR
-mesh_header += "COIL_ARM_BOT_Z = %s\n" % COIL_ARM_BOT_Z
-mesh_header += "COIL_ARM_TOP_Z = %s\n" % COIL_ARM_TOP_Z
+mesh_header += "PIPE_INLET_Z = %s\n" % PIPE_INLET_Z
+mesh_header += "PIPE_OUTLET_Z = %s\n" % PIPE_OUTLET_Z
 
 mesh_body = r"""
 # -- Identify Bodies by volume --
@@ -92,16 +92,32 @@ coil_fluid_body = all_bodies[2]
 
 def get_faces(body):
     try:
-        return list(body.GetGeoBody().Faces)
-    except:
-        return list(body.Faces)
+        faces = list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
+        if faces:
+            _ = faces[0].Centroid
+            print("Tree faces for '%s': %d" % (body.Name, len(faces)))
+            return faces
+    except Exception as e:
+        print("Tree faces failed for '%s': %s" % (body.Name, e))
+    try:
+        faces = list(body.GetGeoBody().Faces)
+        print("GeoData faces for '%s': %d (fallback)" % (body.Name, len(faces)))
+        return faces
+    except Exception as e2:
+        print("GeoData faces also failed for '%s': %s" % (body.Name, e2))
+    return []
 
-def find_nozzle_face(faces, target_z, max_area):
+def find_nozzle_face(faces, target_x, target_z, max_area):
     candidates = []
     for f in faces:
-        if (f.Centroid[0] > NOZZLE_END_R - 5
-                and abs(f.Centroid[1]) < 5
-                and abs(f.Centroid[2] - target_z) < 30
+        cx = f.Centroid[0]
+        cy = f.Centroid[1]
+        cz = f.Centroid[2]
+        print("    check face: cx=%.1f cy=%.1f cz=%.1f area=%.1f (want x>%.0f z~%.0f area<%.0f)" % (
+            cx, cy, cz, f.Area, target_x - 5, target_z, max_area))
+        if (cx > target_x - 5
+                and abs(cy) < 5
+                and abs(cz - target_z) < 30
                 and f.Area < max_area):
             candidates.append(f)
     if candidates:
@@ -123,13 +139,27 @@ def make_ns(name, faces):
 vessel_faces = get_faces(vessel_body)
 coil_inner_faces = get_faces(coil_fluid_body)
 
-vessel_nozzle_area = 3.14159 * VESSEL_NZ_R ** 2 * 2
-coil_nozzle_area = 3.14159 * TUBE_IR ** 2 * 2
+print("Vessel faces: %d" % len(vessel_faces))
+for f in vessel_faces:
+    print("  Vessel face: cx=%.1f cy=%.1f cz=%.1f area=%.1f" % (
+        f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
 
-vi = find_nozzle_face(vessel_faces, VESSEL_NZ_TOP, vessel_nozzle_area)
-vo = find_nozzle_face(vessel_faces, VESSEL_NZ_BOT, vessel_nozzle_area)
-ci = find_nozzle_face(coil_inner_faces, COIL_ARM_BOT_Z, coil_nozzle_area)
-co = find_nozzle_face(coil_inner_faces, COIL_ARM_TOP_Z, coil_nozzle_area)
+print("Coil inner faces: %d" % len(coil_inner_faces))
+for f in coil_inner_faces:
+    print("  Coil face: cx=%.1f cy=%.1f cz=%.1f area=%.1f" % (
+        f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
+
+vessel_nozzle_area = math.pi * VESSEL_NZ_R ** 2 * 2
+coil_nozzle_area = math.pi * TUBE_IR ** 2 * 2
+
+print("Looking for vessel inlet (Z=%.0f)..." % VESSEL_NZ_TOP)
+vi = find_nozzle_face(vessel_faces, NOZZLE_END_X, VESSEL_NZ_TOP, vessel_nozzle_area)
+print("Looking for vessel outlet (Z=%.0f)..." % VESSEL_NZ_BOT)
+vo = find_nozzle_face(vessel_faces, NOZZLE_END_X, VESSEL_NZ_BOT, vessel_nozzle_area)
+print("Looking for circuit inlet (Z=%.0f)..." % PIPE_INLET_Z)
+ci = find_nozzle_face(coil_inner_faces, NOZZLE_END_X, PIPE_INLET_Z, coil_nozzle_area)
+print("Looking for circuit outlet (Z=%.0f)..." % PIPE_OUTLET_Z)
+co = find_nozzle_face(coil_inner_faces, NOZZLE_END_X, PIPE_OUTLET_Z, coil_nozzle_area)
 
 make_ns("Vessel_Inlet", vi)
 make_ns("Vessel_Outlet", vo)
@@ -154,6 +184,10 @@ if vw:
 mesh.GenerateMesh()
 
 mesh.Activate()
+try:
+    Graphics.Camera.SetFit()
+except:
+    pass
 Graphics.ExportImage(
     os.path.join(results_dir, "mesh.png"),
     GraphicsImageExportFormat.PNG)
@@ -397,11 +431,15 @@ ccl_path = os.path.join(project_dir, "lab3_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
-setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
+# Send CCL directly (importCCL file command is broken in WB 2024 R1)
+setup.SendCommand(Command=ccl_content)
 setup.SendCommand(Command='> autoconnect')
 
 # -- Solve ---------------------------------------------------------
-system.Update()
+setup_comp = system.GetComponent(Name="Setup")
+setup_comp.Update()
+solution_comp = system.GetComponent(Name="Solution")
+solution_comp.Update()
 
 # -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
@@ -446,7 +484,7 @@ END
 post_path = os.path.join(project_dir, "lab3_post.ccl")
 with open(post_path, "w") as f:
     f.write(post_ccl)
-results.SendCommand(Command='> importCCL filename=' + post_path.replace('\\', '/'))
+results.SendCommand(Command=post_ccl)
 
 for name, fname in [("TempVessel", "temp_vessel"), ("TempCircuit", "temp_circuit"),
                      ("VelVessel", "vel_vessel"), ("VelCircuit", "vel_circuit")]:
@@ -457,12 +495,32 @@ for name, fname in [("TempVessel", "temp_vessel"), ("TempCircuit", "temp_circuit
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-csv_path = os.path.join(results_dir, "values.csv")
-with open(csv_path, "w") as f:
-    f.write("Location,Variable,Unit\n")
-for loc in ["Vessel_Inlet", "Vessel_Outlet", "Circuit_Inlet", "Circuit_Outlet"]:
-    results.SendCommand(Command='> calculate areaAve(Temperature)@%s, units=[K]' % loc)
-    results.SendCommand(Command='> calculate areaAve(Velocity)@%s, units=[m s^-1]' % loc)
+# Use Power Syntax to evaluate and write CSV
+power_lines = [
+    "!open(my $fh, '>', '%s/calc.csv') or die;" % rd,
+    '!print $fh "Function,Variable,Location,Unit,Value\\n";',
+    '!my $v;',
+]
+for func, var, loc, unit in [
+    ("areaAve", "Temperature", "Vessel_Inlet", "K"),
+    ("areaAve", "Temperature", "Vessel_Outlet", "K"),
+    ("areaAve", "Temperature", "Circuit_Inlet", "K"),
+    ("areaAve", "Temperature", "Circuit_Outlet", "K"),
+    ("areaAve", "Velocity", "Vessel_Inlet", "m s^-1"),
+    ("areaAve", "Velocity", "Vessel_Outlet", "m s^-1"),
+    ("areaAve", "Velocity", "Circuit_Inlet", "m s^-1"),
+    ("areaAve", "Velocity", "Circuit_Outlet", "m s^-1"),
+    ("maxVal", "Temperature", "VesselFluid", "K"),
+    ("minVal", "Temperature", "VesselFluid", "K"),
+    ("maxVal", "Temperature", "CoilFluid", "K"),
+    ("minVal", "Temperature", "CoilFluid", "K"),
+]:
+    power_lines.append(
+        "!$v = evaluate('%s(%s)@%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
+        % (func, var, loc, func, var, loc, unit))
+power_lines.append('!close($fh);')
+
+results.SendCommand(Command='\n'.join(power_lines))
 
 print("Lab 3 complete. Results in: " + results_dir)
 Save(Overwrite=True)
