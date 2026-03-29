@@ -169,6 +169,8 @@ make_ns("Circuit_Outlet", co)
 
 # -- Mesh Settings --
 mesh = Model.Mesh
+mesh.PhysicsPreference = MeshPhysicsPreferenceType.CFD
+mesh.SolverPreference = MeshSolverPreferenceType.CFX
 mesh.ElementSize = Quantity("5 [mm]")
 
 vw = [f for f in vessel_faces if f not in vi and f not in vo]
@@ -184,13 +186,10 @@ if vw:
 mesh.GenerateMesh()
 
 mesh.Activate()
-try:
-    Graphics.Camera.SetFit()
-except:
-    pass
-Graphics.ExportImage(
-    os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG)
+Graphics.Camera.SetFit()
+Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+Graphics.ViewOptions.ShowLegend = False
+Graphics.ExportImage(os.path.join(results_dir, "mesh.png"))
 print("Mesh script done")
 """
 
@@ -486,14 +485,21 @@ with open(post_path, "w") as f:
     f.write(post_ccl)
 results.SendCommand(Command=post_ccl)
 
+# Configure image export settings
+results.SendCommand(Command="""HARDCOPY:
+  Hardcopy Format = png
+  White Background = On
+  Use Screen Size = Off
+  Image Width = 1920
+  Image Height = 1080
+END""")
+
 for name, fname in [("TempVessel", "temp_vessel"), ("TempCircuit", "temp_circuit"),
                      ("VelVessel", "vel_vessel"), ("VelCircuit", "vel_circuit")]:
     results.SendCommand(Command='> show %s' % name)
-    results.SendCommand(
-        Command='> export filename=%s/%s.png, type=png, width=1920, height=1080, onscreen=no' % (rd, fname))
+    results.SendCommand(Command='>print %s/%s.png' % (rd, fname))
 
-results.SendCommand(
-    Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
+results.SendCommand(Command='>print %s/geometry.png' % rd)
 
 # Use Power Syntax to evaluate and write CSV
 power_lines = [

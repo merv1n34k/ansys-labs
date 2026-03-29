@@ -86,13 +86,10 @@ mesh.ElementSize = Quantity("10 [mm]")
 mesh.GenerateMesh()
 
 mesh.Activate()
-try:
-    Graphics.Camera.SetFit()
-except:
-    pass
-Graphics.ExportImage(
-    os.path.join(results_dir, "mesh.png"),
-    GraphicsImageExportFormat.PNG)
+Graphics.Camera.SetFit()
+Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+Graphics.ViewOptions.ShowLegend = False
+Graphics.ExportImage(os.path.join(results_dir, "mesh.png"))
 
 # -- Get faces --
 # Tree faces (GetChildren) are compatible with SelectionInfo.Entities.
@@ -245,22 +242,20 @@ SOLN.EvaluateAllResults()
 
 # -- Export result images --
 TOT_DEF.Activate()
-try:
-    Graphics.Camera.SetFit()
-except:
-    pass
-Graphics.ExportImage(
-    os.path.join(results_dir, "deformation.png"),
-    GraphicsImageExportFormat.PNG)
+Graphics.Camera.SetFit()
+Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+Graphics.ViewOptions.ShowLegend = True
+Graphics.ViewOptions.ResultPreference.ShowMinimum = True
+Graphics.ViewOptions.ResultPreference.ShowMaximum = True
+Graphics.ExportImage(os.path.join(results_dir, "deformation.png"))
 
 EQV_STRS.Activate()
-try:
-    Graphics.Camera.SetFit()
-except:
-    pass
-Graphics.ExportImage(
-    os.path.join(results_dir, "stress.png"),
-    GraphicsImageExportFormat.PNG)
+Graphics.Camera.SetFit()
+Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+Graphics.ViewOptions.ShowLegend = True
+Graphics.ViewOptions.ResultPreference.ShowMinimum = True
+Graphics.ViewOptions.ResultPreference.ShowMaximum = True
+Graphics.ExportImage(os.path.join(results_dir, "stress.png"))
 
 # -- Write results CSV --
 max_def = TOT_DEF.Maximum
