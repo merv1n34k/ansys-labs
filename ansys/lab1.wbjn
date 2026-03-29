@@ -1,5 +1,5 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
-# DIAGNOSTIC: Test Workbench-level APIs (skip Mechanical scripting)
+# Uses Static Structural template with STEP geometry import
 # Run: runwb2 -R ansys/lab1.wbjn
 
 import os
@@ -10,15 +10,23 @@ step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab1")
 results_dir = os.path.join(root_dir, "results", "lab1")
 
+print("ROOT: " + root_dir)
+print("STEP: " + step_file)
+print("STEP exists: " + str(os.path.exists(step_file)))
+
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
 # -- Create Static Structural system --------------------------------
 template = None
+errors = []
 for name, solver in [("Static Structural", "ANSYS"),
                      ("Static Structural", "Mechanical APDL"),
-                     ("Static Structural", None)]:
+                     ("Static Structural", None),
+                     ("Static Structural (ANSYS)", None),
+                     ("Structural Analysis", "ANSYS"),
+                     ("Structural Analysis", None)]:
     try:
         if solver:
             template = GetTemplate(TemplateName=name, Solver=solver)
@@ -26,137 +34,184 @@ for name, solver in [("Static Structural", "ANSYS"),
             template = GetTemplate(TemplateName=name)
         print("Found template: '%s' (solver=%s)" % (name, solver))
         break
-    except:
-        pass
+    except Exception as e:
+        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
+
+if template is None:
+    print("All template attempts failed:")
+    for err in errors:
+        print(err)
+    raise Exception("Could not find Static Structural template")
 
 system = template.CreateSystem()
-Save(FilePath=os.path.join(project_dir, "lab1.wbpj"), Overwrite=True)
 
-# -- Engineering Data -----------------------------------------------
+proj_path = os.path.join(project_dir, "lab1.wbpj")
+Save(FilePath=proj_path, Overwrite=True)
+
+# -- Import Stainless Steel from material library -------------------
 eng_data = system.GetContainer(ComponentName="Engineering Data")
 eng_data.ImportMaterial(Name="Stainless Steel", Source="General_Materials.xml")
 
-# -- Geometry Import ------------------------------------------------
+# -- Import STEP geometry -------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Get Model container (DO NOT Edit) ------------------------------
+# -- Write Mechanical script to .py file ----------------------------
+# SendCommand(Language="Python") executes Python inside Mechanical.
+# We write to a file and use execfile() to avoid string escaping issues.
+mech_path = os.path.join(project_dir, "lab1_mech.py")
+mech_header = "import os\nimport math\n\n"
+mech_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
+
+mech_body = r"""
+# -- Assign material to all bodies --
+all_bodies = list(Model.Geometry.GetChildren(
+    DataModelObjectCategory.Body, True
+))
+all_bodies.sort(key=lambda b: b.Volume, reverse=True)
+print("Bodies: %d" % len(all_bodies))
+for b in all_bodies:
+    b.Material = "Stainless Steel"
+    print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
+
+vessel_body = all_bodies[0]
+
+# -- Mesh --
+mesh = Model.Mesh
+mesh.ElementSize = Quantity("10 mm")
+mesh.GenerateMesh()
+
+mesh.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "mesh.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# -- Identify faces for pressure BC --
+vessel_faces = list(vessel_body.GetChildren(
+    DataModelObjectCategory.GeoFace, True
+))
+
+inner_faces = []
+for f in vessel_faces:
+    r = math.sqrt(f.Centroid.X**2 + f.Centroid.Y**2)
+    z = f.Centroid.Z
+    if r < 248.5 and z < 1001:
+        inner_faces.append(f)
+
+print("Inner vessel faces (pressure): %d" % len(inner_faces))
+
+# -- Named Selection for pressure faces --
+ns_pressure = Model.AddNamedSelection()
+ns_pressure.Name = "InnerFaces"
+sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+sel.Entities = inner_faces
+ns_pressure.Location = sel
+
+# -- Boundary Conditions --
+analysis = Model.Analyses[0]
+
+PRESSURE = analysis.AddPressure()
+PRESSURE.Location = ns_pressure
+PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
+
+cmd = analysis.AddCommandSnippet()
+cmd.Input = '''! Material: Stainless Steel (Variant 13 exact values)
+MP,EX,1,193e3
+MP,PRXY,1,0.31
+MP,DENS,1,7.75e-9
+MP,ALPX,1,1.7e-5
+
+! Reference temperature for thermal strain
+TREF,22
+
+! Uniform temperature load: 75 C
+NSEL,ALL
+BF,ALL,TEMP,75
+
+! Gravity: Z-down (ACEL = reference frame acceleration)
+ACEL,0,0,9806.6
+
+! Fixed support on outer pad faces (R > 295, mid-height zone)
+LOCAL,11,1,0,0,0
+CSYS,11
+NSEL,S,LOC,X,295,400
+NSEL,R,LOC,Z,400,600
+CSYS,0
+D,ALL,ALL
+
+NSEL,ALL
+ALLS'''
+
+# -- Result objects --
+SOLN = analysis.Solution
+TOT_DEF = SOLN.AddTotalDeformation()
+EQV_STRS = SOLN.AddEquivalentStress()
+
+# -- Solve --
+SOLN.Solve(True)
+SOLN.EvaluateAllResults()
+
+# -- Export result images --
+TOT_DEF.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "deformation.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+EQV_STRS.Activate()
+Graphics.ExportImage(
+    os.path.join(results_dir, "stress.png"),
+    GraphicsImageExportFormat.PNG,
+    GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
+)
+
+# -- Write results CSV --
+max_def = TOT_DEF.Maximum
+max_stress = EQV_STRS.Maximum
+try:
+    max_def_val = max_def.Value
+    max_stress_val = max_stress.Value
+except:
+    max_def_val = max_def
+    max_stress_val = max_stress
+
+csv_path = os.path.join(results_dir, "summary.csv")
+with open(csv_path, "w") as f:
+    f.write("Parameter,Value,Unit\n")
+    f.write("Max Total Deformation,%s,mm\n" % max_def_val)
+    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
+
+# Write success marker
+open(os.path.join(results_dir, "done.txt"), "w").write("Lab 1 complete")
+print("Lab 1 complete. Results in: " + results_dir)
+print("Max Deformation: %s mm" % max_def_val)
+print("Max Stress: %s MPa" % max_stress_val)
+"""
+
+with open(mech_path, "w") as f:
+    f.write(mech_header)
+    f.write(mech_body)
+print("Mechanical script: " + mech_path)
+
+# -- Open Mechanical and execute script -----------------------------
 model_container = system.GetContainer(ComponentName="Model")
-print("")
-print("=== WORKBENCH-LEVEL API PROBES ===")
-print("")
-
-# -- Probe 1: GetMechanicalModel -----------------------------------
-try:
-    mech_model = model_container.GetMechanicalModel()
-    print("[GetMechanicalModel] type=%s" % type(mech_model).__name__)
-    try:
-        attrs = [a for a in dir(mech_model) if not a.startswith('_')]
-        print("[GetMechanicalModel] attrs: %s" % ", ".join(attrs))
-    except:
-        pass
-except Exception as e:
-    print("[GetMechanicalModel] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-# -- Probe 2: GetMeshProperties ------------------------------------
-try:
-    mesh_props = model_container.GetMeshProperties()
-    print("[GetMeshProperties] type=%s" % type(mesh_props).__name__)
-    try:
-        attrs = [a for a in dir(mesh_props) if not a.startswith('_')]
-        print("[GetMeshProperties] attrs: %s" % ", ".join(attrs))
-    except:
-        pass
-except Exception as e:
-    print("[GetMeshProperties] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-# -- Probe 3: GetAllParameters -------------------------------------
-try:
-    params = model_container.GetAllParameters()
-    print("[GetAllParameters] type=%s" % type(params).__name__)
-    print("[GetAllParameters] value=%s" % str(params))
-    if hasattr(params, '__iter__'):
-        for p in params:
-            print("  param: %s" % str(p))
-            try:
-                pattrs = [a for a in dir(p) if not a.startswith('_')]
-                print("    attrs: %s" % ", ".join(pattrs))
-            except:
-                pass
-except Exception as e:
-    print("[GetAllParameters] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-# -- Probe 4: GetModelComponentProperties --------------------------
-try:
-    comp_props = model_container.GetModelComponentProperties()
-    print("[GetModelComponentProperties] type=%s" % type(comp_props).__name__)
-    try:
-        attrs = [a for a in dir(comp_props) if not a.startswith('_')]
-        print("[GetModelComponentProperties] attrs: %s" % ", ".join(attrs))
-    except:
-        pass
-except Exception as e:
-    print("[GetModelComponentProperties] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-# -- Probe 5: GetMechanicalSystemType ------------------------------
-try:
-    sys_type = model_container.GetMechanicalSystemType()
-    print("[GetMechanicalSystemType] = %s" % str(sys_type))
-except Exception as e:
-    print("[GetMechanicalSystemType] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-# -- Probe 6: SendCommand with APDL (with side-effect file) --------
-# Test if APDL commands reach the solver by writing a marker file
-print("")
-print("=== APDL SendCommand TESTS (after Edit) ===")
 model_container.Edit(Interactive=True)
+print("Executing Mechanical script via SendCommand...")
+model_container.SendCommand(Language="Python",
+    Command="execfile(r'%s')" % mech_path.replace("\\", "/"))
+print("SendCommand returned")
 
-# Test: write a marker via APDL /SYS command
-marker_path = os.path.join(project_dir, "apdl_marker.txt")
-try:
-    model_container.SendCommand(Command="/SYS,echo APDL_WORKS > %s" % marker_path)
-    print("[APDL /SYS] command sent")
-except Exception as e:
-    print("[APDL /SYS] FAIL: %s" % str(e))
-
-import time
-time.sleep(2)
-
-if os.path.exists(marker_path):
-    print("[APDL /SYS] CONFIRMED: marker file exists!")
-    with open(marker_path) as f:
-        print("[APDL /SYS] content: %s" % f.read().strip())
+# Check if script completed
+done_path = os.path.join(results_dir, "done.txt")
+if os.path.exists(done_path):
+    print("SUCCESS: Mechanical script completed")
 else:
-    print("[APDL /SYS] marker file NOT created")
+    print("WARNING: done.txt not found -- script may have errored")
 
-# Test: Python SendCommand with file side-effect
-py_marker = os.path.join(project_dir, "python_marker.txt")
-try:
-    cmd = "open(r'%s', 'w').write('PYTHON_WORKS')" % py_marker.replace("\\", "/")
-    model_container.SendCommand(Language="Python", Command=cmd)
-    print("[Python file test] command sent")
-except Exception as e:
-    print("[Python file test] FAIL: %s" % str(e))
-
-time.sleep(2)
-
-if os.path.exists(py_marker):
-    print("[Python file test] CONFIRMED: marker file exists!")
-    with open(py_marker) as f:
-        print("[Python file test] content: %s" % f.read().strip())
-else:
-    print("[Python file test] marker file NOT created")
-
-# -- Probe 7: StartGrpcServer (PyMechanical remote API) ------------
-try:
-    port = model_container.StartGrpcServer(50051)
-    print("[StartGrpcServer] returned: %s" % str(port))
-except Exception as e:
-    print("[StartGrpcServer] FAIL: %s: %s" % (type(e).__name__, str(e)))
-
-print("")
-print("=== DIAGNOSTIC COMPLETE ===")
 Save(Overwrite=True)

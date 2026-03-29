@@ -40,22 +40,14 @@ geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Meshing -------------------------------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
+# -- Write mesh script to .py file ---------------------------------
+mesh_path = os.path.join(project_dir, "lab4_mesh.py")
+mesh_header = "import os\nimport math\n\n"
+mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
+mesh_header += "EMITTER_DEPTH = %s\n" % EMITTER_DEPTH
+mesh_header += "EMITTER_AREA = %s\n" % EMITTER_AREA
 
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
-
-# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
-mesh_script = """
-import os
-import math
-
-results_dir = r'{results_dir}'
-EMITTER_DEPTH = {EMITTER_DEPTH}
-EMITTER_AREA = {EMITTER_AREA}
-
+mesh_body = r"""
 geo = Model.Geometry
 all_faces = []
 for body in geo.GetChildren(DataModelObjectCategory.Body, True):
@@ -67,7 +59,6 @@ for f in all_faces:
     print("  Face: centroid=(%.1f, %.1f, %.1f) area=%.1f" % (
         f.Centroid.X, f.Centroid.Y, f.Centroid.Z, f.Area))
 
-# Emitter: flat circular face at Z=5mm, centered at (0,0), area ~1257 mm^2
 emitter_faces = []
 wall_faces = []
 for f in all_faces:
@@ -94,7 +85,6 @@ sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEnti
 sel.Entities = wall_faces
 ns_wall.Location = sel
 
-# Mesh: 3mm elements (lambda/10 = 6.4mm, we use half for safety)
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("3 mm")
 mesh.GenerateMesh()
@@ -105,20 +95,26 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
-""".format(
-    results_dir=results_dir.replace("\\", "/"),
-    EMITTER_DEPTH=EMITTER_DEPTH,
-    EMITTER_AREA=EMITTER_AREA,
-)
+print("Mesh script done")
+"""
 
-model.SendCommand(Language="Python", Command=mesh_script)
+with open(mesh_path, "w") as f:
+    f.write(mesh_header)
+    f.write(mesh_body)
+
+# -- Meshing via Mechanical -----------------------------------------
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+model.SendCommand(Language="Python",
+    Command="execfile(r'%s')" % mesh_path.replace("\\", "/"))
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
-# Custom CompressibleWater: Linear Elastic EOS with c=1480 m/s.
-# Without this, library Water is incompressible -> no wave propagation.
 ccl_content = """
 LIBRARY:
   MATERIAL: CompressibleWater
@@ -327,15 +323,12 @@ for name, fname in [("PressureContour", "pressure"), ("VelocityContour", "veloci
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-# Animation: export frames from transient results, assemble with ffmpeg
-# CFX-Post batch animation varies by version; export key frames as fallback.
 results.SendCommand(Command='> timeStep first')
-for i in range(50):  # export 50 evenly spaced frames
+for i in range(50):
     results.SendCommand(Command='> show PressureContour')
     results.SendCommand(
         Command='> export filename=%s/frame_%04d.png, type=png, width=1920, height=1080, onscreen=no' % (rd, i))
     results.SendCommand(Command='> timeStep next, increment=10')
-# Combine: ffmpeg -r 30 -i frame_%04d.png -c:v libx264 -pix_fmt yuv420p animation.mp4
 
 print("Lab 4 complete. Results in: " + results_dir)
 Save(Overwrite=True)

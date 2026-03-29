@@ -30,19 +30,12 @@ geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Meshing: Named Selections + Mesh ------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
+# -- Write mesh script to .py file ---------------------------------
+mesh_path = os.path.join(project_dir, "lab2_mesh.py")
+mesh_header = "import os\n\n"
+mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
 
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
-
-# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
-mesh_script = """
-import os
-
-results_dir = r'{results_dir}'
-
+mesh_body = r"""
 geo = Model.Geometry
 all_faces = []
 for body in geo.GetChildren(DataModelObjectCategory.Body, True):
@@ -114,9 +107,21 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
-""".format(results_dir=results_dir.replace("\\", "/"))
+print("Mesh script done")
+"""
 
-model.SendCommand(Language="Python", Command=mesh_script)
+with open(mesh_path, "w") as f:
+    f.write(mesh_header)
+    f.write(mesh_body)
+
+# -- Meshing via Mechanical -----------------------------------------
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+model.SendCommand(Language="Python",
+    Command="execfile(r'%s')" % mesh_path.replace("\\", "/"))
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
@@ -254,7 +259,6 @@ results.Edit()
 
 rd = results_dir.replace('\\', '/')
 
-# Mid-plane at Y=0 (pipe along X, centered at Y=0, Z=0)
 post_ccl = """
 PLANE: MidPlane
   Option = XZ Plane
@@ -303,13 +307,11 @@ VECTOR: Vectors
   Variable = Velocity
 END
 """
-# Import all objects at once
 post_ccl_path = os.path.join(project_dir, "lab2_post.ccl")
 with open(post_ccl_path, "w") as f:
     f.write(post_ccl)
 results.SendCommand(Command='> importCCL filename=' + post_ccl_path.replace('\\', '/'))
 
-# Export images one by one (activate each object before export)
 for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vectors"]:
     fname = name.lower().replace("streamlines", "streamline").replace("vectors", "vector")
     results.SendCommand(Command='> show %s' % name)
@@ -319,8 +321,6 @@ for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vector
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-# -- Function Calculator -> CSV ------------------------------------
-# Values are printed to solver output log; also write to CSV via Python
 calc_pairs = [
     ("maxVal", "Velocity", "", "m s^-1"),
     ("areaAve", "Velocity", "Inlet", "m s^-1"),
@@ -343,8 +343,6 @@ with open(csv_path, "w") as f:
             cmd = '> calculate %s(%s), units=[%s]' % (func, var, unit)
         results.SendCommand(Command=cmd)
         f.write("%s,%s,%s,%s\n" % (func, var, loc or "Domain", unit))
-        # NOTE: actual numeric values appear in console log only.
-        # Parse from <project_dir>/lab2_*_Output/*.out after run.
 
 print("Lab 2 complete. Results in: " + results_dir)
 Save(Overwrite=True)

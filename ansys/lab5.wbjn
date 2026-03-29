@@ -26,28 +26,20 @@ system = template.CreateSystem()
 proj_path = os.path.join(project_dir, "lab5.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# -- Geometry Import (single assembly STEP) ------------------------
+# -- Geometry Import -----------------------------------------------
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Meshing -------------------------------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
+# -- Write mesh script to .py file ---------------------------------
+mesh_path = os.path.join(project_dir, "lab5_mesh.py")
+mesh_header = "import os\n\n"
+mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
+mesh_header += "SHELL_H = %s\n" % SHELL_H
 
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
-
-# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
-mesh_script = """
-import os
-
-results_dir = r'{results_dir}'
-SHELL_H = {SHELL_H}
-
-# Identify bodies by volume: vessel_fluid (large) vs mixer (small)
+mesh_body = r"""
 all_bodies = list(Model.Geometry.GetChildren(
     DataModelObjectCategory.Body, True
 ))
@@ -59,7 +51,6 @@ for b in all_bodies:
 vessel_body = all_bodies[0]
 mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
 
-# -- Named Selections --
 vessel_faces = list(vessel_body.GetChildren(
     DataModelObjectCategory.GeoFace, True
 ))
@@ -96,7 +87,6 @@ if mixer_body:
     ns.Location = sel
     print("Mixer: %d faces" % len(mixer_faces))
 
-# -- Mesh --
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("8 mm")
 mesh.GenerateMesh()
@@ -107,12 +97,21 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
-""".format(
-    results_dir=results_dir.replace("\\", "/"),
-    SHELL_H=SHELL_H,
-)
+print("Mesh script done")
+"""
 
-model.SendCommand(Language="Python", Command=mesh_script)
+with open(mesh_path, "w") as f:
+    f.write(mesh_header)
+    f.write(mesh_body)
+
+# -- Meshing via Mechanical -----------------------------------------
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+model.SendCommand(Language="Python",
+    Command="execfile(r'%s')" % mesh_path.replace("\\", "/"))
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
@@ -328,15 +327,12 @@ for name, fname in [("VelocityContour", "velocity"), ("PressureContour", "pressu
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-# Animation: export frames, assemble with ffmpeg
-# 960 timesteps, output every 24 = 40 result files
 results.SendCommand(Command='> timeStep first')
 for i in range(40):
     results.SendCommand(Command='> show VelocityContour')
     results.SendCommand(
         Command='> export filename=%s/frame_%04d.png, type=png, width=1920, height=1080, onscreen=no' % (rd, i))
     results.SendCommand(Command='> timeStep next')
-# Combine: ffmpeg -r 10 -i frame_%04d.png -c:v libx264 -pix_fmt yuv420p animation.mp4
 
 print("Lab 5 complete. Results in: " + results_dir)
 Save(Overwrite=True)

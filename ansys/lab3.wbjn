@@ -2,10 +2,6 @@
 # Run: runwb2 -R ansys/lab3.wbjn
 #
 # Geometry: 3-body STEP assembly (vessel_fluid, coil_solid_copper, coil_fluid).
-# All nozzle faces at Y=0, +X direction, X ~= 310 mm.
-# Vessel nozzles: Z=950 (inlet), Z=50 (outlet), R=20mm.
-# Coil nozzles: Z~=183 (inlet/bottom), Z~=817 (outlet/top).
-#
 # Domain interfaces are auto-detected by CFX-Pre from coincident mesh faces.
 
 import os
@@ -46,27 +42,19 @@ geom_comp = system.GetComponent(Name="Geometry")
 geom_comp.Refresh()
 geom_comp.Update()
 
-# -- Meshing -------------------------------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
+# -- Write mesh script to .py file ---------------------------------
+mesh_path = os.path.join(project_dir, "lab3_mesh.py")
+mesh_header = "import os\n\n"
+mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
+mesh_header += "NOZZLE_END_R = %s\n" % NOZZLE_END_R
+mesh_header += "VESSEL_NZ_TOP = %s\n" % VESSEL_NZ_TOP
+mesh_header += "VESSEL_NZ_BOT = %s\n" % VESSEL_NZ_BOT
+mesh_header += "VESSEL_NZ_R = %s\n" % VESSEL_NZ_R
+mesh_header += "TUBE_IR = %s\n" % TUBE_IR
+mesh_header += "COIL_ARM_BOT_Z = %s\n" % COIL_ARM_BOT_Z
+mesh_header += "COIL_ARM_TOP_Z = %s\n" % COIL_ARM_TOP_Z
 
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
-
-# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
-mesh_script = """
-import os
-
-results_dir = r'{results_dir}'
-
-NOZZLE_END_R = {NOZZLE_END_R}
-VESSEL_NZ_TOP = {VESSEL_NZ_TOP}
-VESSEL_NZ_BOT = {VESSEL_NZ_BOT}
-VESSEL_NZ_R = {VESSEL_NZ_R}
-TUBE_IR = {TUBE_IR}
-COIL_ARM_BOT_Z = {COIL_ARM_BOT_Z}
-COIL_ARM_TOP_Z = {COIL_ARM_TOP_Z}
-
+mesh_body = r"""
 # -- Identify Bodies by volume --
 all_bodies = list(Model.Geometry.GetChildren(
     DataModelObjectCategory.Body, True
@@ -80,7 +68,6 @@ vessel_body = all_bodies[0]
 coil_solid_body = all_bodies[1]
 coil_fluid_body = all_bodies[2]
 
-# -- Helper functions --
 def get_faces(body):
     return list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
 
@@ -108,7 +95,6 @@ def make_ns(name, faces):
     ns.Location = sel
     print("NS '%s': %d faces" % (name, len(faces)))
 
-# -- Named Selections --
 vessel_faces = get_faces(vessel_body)
 coil_inner_faces = get_faces(coil_fluid_body)
 
@@ -130,7 +116,6 @@ make_ns("Circuit_Outlet", co)
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("5 mm")
 
-# Inflation on vessel wall for convection resolution
 vw = [f for f in vessel_faces if f not in vi and f not in vo]
 if vw:
     inflation = mesh.AddInflation()
@@ -149,18 +134,21 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
-""".format(
-    results_dir=results_dir.replace("\\", "/"),
-    NOZZLE_END_R=NOZZLE_END_R,
-    VESSEL_NZ_TOP=VESSEL_NZ_TOP,
-    VESSEL_NZ_BOT=VESSEL_NZ_BOT,
-    VESSEL_NZ_R=VESSEL_NZ_R,
-    TUBE_IR=TUBE_IR,
-    COIL_ARM_BOT_Z=COIL_ARM_BOT_Z,
-    COIL_ARM_TOP_Z=COIL_ARM_TOP_Z,
-)
+print("Mesh script done")
+"""
 
-model.SendCommand(Language="Python", Command=mesh_script)
+with open(mesh_path, "w") as f:
+    f.write(mesh_header)
+    f.write(mesh_body)
+
+# -- Meshing via Mechanical -----------------------------------------
+mesh_component = system.GetComponent(Name="Mesh")
+mesh_component.Refresh()
+
+model = system.GetContainer(ComponentName="Mesh")
+model.Edit()
+model.SendCommand(Language="Python",
+    Command="execfile(r'%s')" % mesh_path.replace("\\", "/"))
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
@@ -371,8 +359,6 @@ with open(ccl_path, "w") as f:
     f.write(ccl_content)
 
 setup.SendCommand(Command='> importCCL filename=' + ccl_path.replace('\\', '/'))
-
-# Trigger auto-detection of domain interfaces for coincident faces
 setup.SendCommand(Command='> autoconnect')
 
 # -- Solve ---------------------------------------------------------
@@ -432,7 +418,6 @@ for name, fname in [("TempVessel", "temp_vessel"), ("TempCircuit", "temp_circuit
 results.SendCommand(
     Command='> export filename=%s/geometry.png, type=png, width=1920, height=1080, onscreen=no' % rd)
 
-# Extract inlet/outlet values
 csv_path = os.path.join(results_dir, "values.csv")
 with open(csv_path, "w") as f:
     f.write("Location,Variable,Unit\n")
