@@ -203,15 +203,30 @@ print("Mechanical script: " + mech_path)
 model_container = system.GetContainer(ComponentName="Model")
 model_container.Edit(Interactive=True)
 print("Executing Mechanical script via SendCommand...")
+# Write wrapper with error capture
+error_path = os.path.join(project_dir, "lab1_error.txt")
+wrapper_path = os.path.join(project_dir, "lab1_wrapper.py")
+with open(wrapper_path, "w") as f:
+    f.write("import traceback\n")
+    f.write("try:\n")
+    f.write("    execfile(r'%s')\n" % mech_path.replace("\\", "/"))
+    f.write("except Exception as e:\n")
+    f.write("    with open(r'%s', 'w') as ef:\n" % error_path.replace("\\", "/"))
+    f.write("        traceback.print_exc(file=ef)\n")
+
 model_container.SendCommand(Language="Python",
-    Command="execfile(r'%s')" % mech_path.replace("\\", "/"))
+    Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
 print("SendCommand returned")
 
-# Check if script completed
+# Check results
 done_path = os.path.join(results_dir, "done.txt")
 if os.path.exists(done_path):
     print("SUCCESS: Mechanical script completed")
+elif os.path.exists(error_path):
+    print("ERROR in Mechanical script:")
+    with open(error_path) as ef:
+        print(ef.read())
 else:
-    print("WARNING: done.txt not found -- script may have errored")
+    print("WARNING: no done.txt or error.txt -- script may not have run")
 
 Save(Overwrite=True)

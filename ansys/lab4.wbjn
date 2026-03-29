@@ -27,7 +27,29 @@ EMITTER_D = 40.0
 EMITTER_AREA = math.pi * (EMITTER_D / 2.0) ** 2
 
 # -- Create CFX system ---------------------------------------------
-template = GetTemplate(TemplateName="Fluid Flow (CFX)", Solver="CFX")
+template = None
+errors = []
+for name, solver in [("Fluid Flow (CFX)", "CFX"),
+                     ("Fluid Flow (CFX)", None),
+                     ("CFX", "CFX"),
+                     ("CFX", None),
+                     ("Fluid Flow", "CFX")]:
+    try:
+        if solver:
+            template = GetTemplate(TemplateName=name, Solver=solver)
+        else:
+            template = GetTemplate(TemplateName=name)
+        print("Found template: '%s' (solver=%s)" % (name, solver))
+        break
+    except Exception as e:
+        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
+
+if template is None:
+    print("All CFX template attempts failed:")
+    for err in errors:
+        print(err)
+    raise Exception("Could not find CFX template")
+
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab4.wbpj")
@@ -108,8 +130,24 @@ mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
+
+error_path = os.path.join(project_dir, "lab4_mesh_error.txt")
+wrapper_path = os.path.join(project_dir, "lab4_mesh_wrapper.py")
+with open(wrapper_path, "w") as f:
+    f.write("import traceback\n")
+    f.write("try:\n")
+    f.write("    execfile(r'%s')\n" % mesh_path.replace("\\", "/"))
+    f.write("except Exception as e:\n")
+    f.write("    with open(r'%s', 'w') as ef:\n" % error_path.replace("\\", "/"))
+    f.write("        traceback.print_exc(file=ef)\n")
+
 model.SendCommand(Language="Python",
-    Command="execfile(r'%s')" % mesh_path.replace("\\", "/"))
+    Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
+
+if os.path.exists(error_path):
+    print("ERROR in mesh script:")
+    with open(error_path) as ef:
+        print(ef.read())
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
