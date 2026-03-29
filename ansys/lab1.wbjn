@@ -78,6 +78,7 @@ for b in all_bodies:
     print("  '%s': Volume=%s" % (b.Name, b.Volume))
 
 vessel_body = all_bodies[0]
+pad_body = all_bodies[1] if len(all_bodies) > 1 else None
 
 # -- Mesh --
 mesh = Model.Mesh
@@ -100,54 +101,121 @@ def get_faces(body):
     except:
         return list(body.Faces)
 
+R_OUT = 250.0
+R_IN = 247.9
+SHELL_H = 1000.0
+PAD_W = 50.0
+
+# Vessel inner faces for pressure
 vessel_faces = get_faces(vessel_body)
 print("Vessel faces: %d" % len(vessel_faces))
+for f in vessel_faces:
+    r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
+    print("  Vessel face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
 
 inner_faces = []
 for f in vessel_faces:
     r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
     z = f.Centroid[2]
-    if r < 248.5 and z < 1001:
+    if r < R_IN + 0.5 and z < SHELL_H + 1:
         inner_faces.append(f)
-
 print("Inner vessel faces (pressure): %d" % len(inner_faces))
 
-# -- Named Selection for pressure faces --
+# Pad outer faces for fixed support
+pad_outer_faces = []
+if pad_body:
+    pad_faces = get_faces(pad_body)
+    print("Pad body faces: %d" % len(pad_faces))
+    for f in pad_faces:
+        r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
+        print("  Pad face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
+        # Outer pad faces: centroid R ~ R_OUT + PAD_W = 300mm
+        if r > R_OUT + PAD_W * 0.8:
+            pad_outer_faces.append(f)
+    print("Pad outer faces for fixed support: %d" % len(pad_outer_faces))
+else:
+    print("WARNING: no pad body found, only %d bodies" % len(all_bodies))
+
+# -- Named Selections --
 ns_pressure = Model.AddNamedSelection()
 ns_pressure.Name = "InnerFaces"
 sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
 sel.Entities = inner_faces
 ns_pressure.Location = sel
 
-# -- Boundary Conditions --
+ns_pads = None
+if pad_outer_faces:
+    ns_pads = Model.AddNamedSelection()
+    ns_pads.Name = "PadSupport"
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    sel.Entities = pad_outer_faces
+    ns_pads.Location = sel
+
+# -- Boundary Conditions (all via WB API, no APDL) --
 analysis = Model.Analyses[0]
 
+# 1. Pressure on inner faces
 PRESSURE = analysis.AddPressure()
 PRESSURE.Location = ns_pressure
 PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
+print("BC: Pressure 1.1 MPa on %d inner faces" % len(inner_faces))
 
-cmd = analysis.AddCommandSnippet()
-cmd.Input = '''! Reference temperature for thermal strain
-TREF,22
+# 2. Fixed support on pad outer faces
+if ns_pads:
+    FIXED = analysis.AddFixedSupport()
+    FIXED.Location = ns_pads
+    print("BC: Fixed support on %d pad outer faces" % len(pad_outer_faces))
+else:
+    print("ERROR: no pad outer faces for fixed support!")
 
-! Uniform temperature load: 75 C
-NSEL,ALL
-BF,ALL,TEMP,75
+# 3. Gravity (Z-down)
+try:
+    ACCEL = analysis.AddAcceleration()
+    ACCEL.DefineBy = LoadDefineBy.Components
+    ACCEL.XComponent.Output.DiscreteValues = [Quantity("0 [mm s^-2]")]
+    ACCEL.YComponent.Output.DiscreteValues = [Quantity("0 [mm s^-2]")]
+    ACCEL.ZComponent.Output.DiscreteValues = [Quantity("-9806.6 [mm s^-2]")]
+    print("BC: Gravity Z=-9806.6 mm/s^2 via AddAcceleration")
+except Exception as e:
+    print("AddAcceleration failed: %s, trying StandardEarthGravity" % e)
+    try:
+        ACCEL = analysis.AddStandardEarthGravity()
+        print("BC: StandardEarthGravity applied (check direction!)")
+    except Exception as e2:
+        print("ERROR: could not add gravity: %s" % e2)
 
-! Gravity: Z-down in MKS units (m/s^2)
-ACEL,0,0,9.8066
+# 4. Thermal load: reference 22C, applied 75C
+# Set reference temperature
+ref_temp_set = False
+for attr in ["EnvironmentTemperature"]:
+    try:
+        setattr(analysis, attr, Quantity("22 [C]"))
+        print("Reference temp: 22 C via analysis.%s" % attr)
+        ref_temp_set = True
+        break
+    except:
+        pass
+if not ref_temp_set:
+    try:
+        analysis.AnalysisSettings.ReferenceTemperature = Quantity("22 [C]")
+        print("Reference temp: 22 C via AnalysisSettings")
+        ref_temp_set = True
+    except:
+        pass
+if not ref_temp_set:
+    print("WARNING: could not set reference temp via API, using APDL TREF")
+    cmd = analysis.AddCommandSnippet()
+    cmd.Input = "TREF,22"
 
-! Fixed support on outer pad faces
-! MKS coords: R=0.295-0.400m, Z=0.400-0.600m
-LOCAL,11,1,0,0,0
-CSYS,11
-NSEL,S,LOC,X,0.295,0.400
-NSEL,R,LOC,Z,0.400,0.600
-CSYS,0
-D,ALL,ALL
-
-NSEL,ALL
-ALLS'''
+# Apply uniform temperature
+try:
+    TEMP = analysis.AddThermalCondition()
+    TEMP.Magnitude.Output.DiscreteValues = [Quantity("75 [C]")]
+    print("BC: Thermal condition 75 C")
+except Exception as e:
+    print("AddThermalCondition failed: %s, trying APDL BF" % e)
+    cmd = analysis.AddCommandSnippet()
+    cmd.Input = "NSEL,ALL\nBF,ALL,TEMP,75\nNSEL,ALL\nALLS"
 
 # -- Result objects --
 SOLN = analysis.Solution
@@ -187,17 +255,11 @@ except:
     max_def_val = max_def
     max_stress_val = max_stress
 
-# Solver returns stress in Pa; convert to MPa
-try:
-    max_stress_mpa = float(max_stress_val) / 1.0e6
-except:
-    max_stress_mpa = max_stress_val
-
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
     f.write("Parameter,Value,Unit\n")
     f.write("Max Total Deformation,%s,mm\n" % max_def_val)
-    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_mpa)
+    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
 
 # Write success marker
 open(os.path.join(results_dir, "done.txt"), "w").write("Lab 1 complete")
