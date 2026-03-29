@@ -1,5 +1,5 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 2: CFX Steady-State (Variant 13)
-# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab2.wbjn
+# Run: runwb2 -R ansys/lab2.wbjn
 #
 # Geometry: pipe D=100mm along X axis (X=0..300), cone obstacle at X=125..175.
 # Single fluid domain body after boolean subtract (pipe - cone).

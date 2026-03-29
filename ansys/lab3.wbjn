@@ -1,5 +1,5 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 3: CFX CHT Steady-State (Variant 13)
-# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab3.wbjn
+# Run: runwb2 -R ansys/lab3.wbjn
 #
 # Geometry: 3-body STEP assembly (vessel_fluid, coil_solid_copper, coil_fluid).
 # All nozzle faces at Y=0, +X direction, X ~= 310 mm.

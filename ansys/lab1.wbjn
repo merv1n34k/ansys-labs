@@ -1,6 +1,6 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
 # Uses Static Structural template with STEP geometry import
-# Run: xvfb-run --auto-servernum runwb2 -R ansys/lab1.wbjn
+# Run: runwb2 -R ansys/lab1.wbjn
 
 import os
 import math
@@ -65,7 +65,7 @@ print("Opening Mechanical editor...")
 print("DISPLAY = %s" % os.environ.get("DISPLAY", "NOT SET"))
 print("QT_QPA_PLATFORM = %s" % os.environ.get("QT_QPA_PLATFORM", "NOT SET"))
 model_container = system.GetContainer(ComponentName="Model")
-model_container.Edit()
+model_container.Edit(Interactive=True)
 print("Mechanical editor opened successfully")
 
 # -- Assign material to all bodies ----------------------------------
