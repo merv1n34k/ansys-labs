@@ -70,15 +70,26 @@ mesh_header += "EMITTER_DEPTH = %s\n" % EMITTER_DEPTH
 mesh_header += "EMITTER_AREA = %s\n" % EMITTER_AREA
 
 mesh_body = r"""
+# Discover face category
+face_cat = None
+for _attr in ['GeoFace', 'Face', 'GeometryFace']:
+    if hasattr(DataModelObjectCategory, _attr):
+        face_cat = getattr(DataModelObjectCategory, _attr)
+        print("Face category: %s" % _attr)
+        break
+if face_cat is None:
+    cats = [a for a in dir(DataModelObjectCategory) if not a.startswith('_')]
+    print("ERROR: No face category. Available: %s" % str(cats))
+
 geo = Model.Geometry
 all_faces = []
 for body in geo.GetChildren(DataModelObjectCategory.Body, True):
-    for face in body.GetChildren(DataModelObjectCategory.GeoFace, True):
+    for face in body.GetChildren(face_cat, True):
         all_faces.append(face)
 
 print("Total faces: %d" % len(all_faces))
 for f in all_faces:
-    print("  Face: centroid=(%.1f, %.1f, %.1f) area=%.1f" % (
+    print("  Face: centroid=(%s, %s, %s) area=%s" % (
         f.Centroid.X, f.Centroid.Y, f.Centroid.Z, f.Area))
 
 emitter_faces = []

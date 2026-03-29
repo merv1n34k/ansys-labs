@@ -84,14 +84,25 @@ all_bodies = list(Model.Geometry.GetChildren(
 all_bodies.sort(key=lambda b: b.Volume, reverse=True)
 print("Bodies: %d" % len(all_bodies))
 for b in all_bodies:
-    print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
+    print("  '%s': Volume=%s" % (b.Name, b.Volume))
+
+# Discover face category
+face_cat = None
+for _attr in ['GeoFace', 'Face', 'GeometryFace']:
+    if hasattr(DataModelObjectCategory, _attr):
+        face_cat = getattr(DataModelObjectCategory, _attr)
+        print("Face category: %s" % _attr)
+        break
+if face_cat is None:
+    cats = [a for a in dir(DataModelObjectCategory) if not a.startswith('_')]
+    print("ERROR: No face category. Available: %s" % str(cats))
 
 vessel_body = all_bodies[0]
 coil_solid_body = all_bodies[1]
 coil_fluid_body = all_bodies[2]
 
 def get_faces(body):
-    return list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
+    return list(body.GetChildren(face_cat, True))
 
 def find_nozzle_face(faces, target_z, max_area):
     candidates = []
