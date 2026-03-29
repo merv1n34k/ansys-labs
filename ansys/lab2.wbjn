@@ -37,8 +37,12 @@ mesh_component.Refresh()
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
-# -- Named Selections (before meshing) -----------------------------
-# Pipe along X: inlet at X=0, outlet at X=300, wall = everything else.
+# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
+mesh_script = """
+import os
+
+results_dir = r'{results_dir}'
+
 geo = Model.Geometry
 all_faces = []
 for body in geo.GetChildren(DataModelObjectCategory.Body, True):
@@ -78,7 +82,7 @@ sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEnti
 sel.Entities = wall_faces
 ns_wall.Location = sel
 
-# -- Mesh Settings -------------------------------------------------
+# -- Mesh Settings --
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("3 mm")
 
@@ -110,6 +114,9 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
+""".format(results_dir=results_dir.replace("\\", "/"))
+
+model.SendCommand(Language="Python", Command=mesh_script)
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")

@@ -40,6 +40,13 @@ mesh_component.Refresh()
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
+# -- Mechanical mesh script (runs inside Mechanical via SendCommand)
+mesh_script = """
+import os
+
+results_dir = r'{results_dir}'
+SHELL_H = {SHELL_H}
+
 # Identify bodies by volume: vessel_fluid (large) vs mixer (small)
 all_bodies = list(Model.Geometry.GetChildren(
     DataModelObjectCategory.Body, True
@@ -52,7 +59,7 @@ for b in all_bodies:
 vessel_body = all_bodies[0]
 mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
 
-# -- Named Selections ---------------------------------------------
+# -- Named Selections --
 vessel_faces = list(vessel_body.GetChildren(
     DataModelObjectCategory.GeoFace, True
 ))
@@ -89,7 +96,7 @@ if mixer_body:
     ns.Location = sel
     print("Mixer: %d faces" % len(mixer_faces))
 
-# -- Mesh ----------------------------------------------------------
+# -- Mesh --
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("8 mm")
 mesh.GenerateMesh()
@@ -100,14 +107,17 @@ Graphics.ExportImage(
     GraphicsImageExportFormat.PNG,
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
+""".format(
+    results_dir=results_dir.replace("\\", "/"),
+    SHELL_H=SHELL_H,
+)
+
+model.SendCommand(Language="Python", Command=mesh_script)
 
 # -- CFX-Pre Setup ------------------------------------------------
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
 
-# Domain references assembly body name "vessel_fluid" for fluid.
-# Immersed Solid references "Mixer" Named Selection.
-# Rotation around Z axis = Coord 0.3 (geometry is Z-up).
 ccl_content = """
 FLOW: Flow Analysis 1
   SOLUTION UNITS:

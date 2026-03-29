@@ -62,13 +62,20 @@ geom_comp.Update()
 
 # -- Open Mechanical editor -----------------------------------------
 print("Opening Mechanical editor...")
-print("DISPLAY = %s" % os.environ.get("DISPLAY", "NOT SET"))
-print("QT_QPA_PLATFORM = %s" % os.environ.get("QT_QPA_PLATFORM", "NOT SET"))
 model_container = system.GetContainer(ComponentName="Model")
 model_container.Edit(Interactive=True)
 print("Mechanical editor opened successfully")
 
-# -- Assign material to all bodies ----------------------------------
+# -- Mechanical script (runs inside Mechanical via SendCommand) -----
+# Model, ExtAPI, Quantity, etc. live in Mechanical namespace,
+# not in the Workbench journal. Use SendCommand to execute.
+mech_script = """
+import os
+import math
+
+results_dir = r'{results_dir}'
+
+# -- Assign material to all bodies --
 all_bodies = list(Model.Geometry.GetChildren(
     DataModelObjectCategory.Body, True
 ))
@@ -79,9 +86,8 @@ for b in all_bodies:
     print("  '%s': Volume=%.0f mm^3" % (b.Name, b.Volume))
 
 vessel_body = all_bodies[0]
-pads_body = all_bodies[1] if len(all_bodies) > 1 else None
 
-# -- Mesh -----------------------------------------------------------
+# -- Mesh --
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("10 mm")
 mesh.GenerateMesh()
@@ -93,7 +99,7 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# -- Identify faces for pressure BC --------------------------------
+# -- Identify faces for pressure BC --
 vessel_faces = list(vessel_body.GetChildren(
     DataModelObjectCategory.GeoFace, True
 ))
@@ -107,64 +113,58 @@ for f in vessel_faces:
 
 print("Inner vessel faces (pressure): %d" % len(inner_faces))
 
-# -- Named Selection for pressure faces -----------------------------
+# -- Named Selection for pressure faces --
 ns_pressure = Model.AddNamedSelection()
 ns_pressure.Name = "InnerFaces"
 sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
 sel.Entities = inner_faces
 ns_pressure.Location = sel
 
-# -- Boundary Conditions --------------------------------------------
+# -- Boundary Conditions --
 analysis = Model.Analyses[0]
 
-# Pressure on inner vessel faces (ACT API required -- APDL SFA won't work
-# because Mechanical does not create APDL area entities from STEP geometry)
 PRESSURE = analysis.AddPressure()
 PRESSURE.Location = ns_pressure
 PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
 
-# Fixed support + thermal + gravity + material via APDL Command Snippet
-# (node-based APDL commands work fine in Mechanical context)
 cmd = analysis.AddCommandSnippet()
-cmd.Input = "\n".join([
-    "! Material: Stainless Steel (Variant 13 exact values)",
-    "MP,EX,1,193e3",
-    "MP,PRXY,1,0.31",
-    "MP,DENS,1,7.75e-9",
-    "MP,ALPX,1,1.7e-5",
-    "",
-    "! Reference temperature for thermal strain",
-    "TREF,22",
-    "",
-    "! Uniform temperature load: 75 C",
-    "NSEL,ALL",
-    "BF,ALL,TEMP,75",
-    "",
-    "! Gravity: Z-down (ACEL = reference frame acceleration)",
-    "ACEL,0,0,9806.6",
-    "",
-    "! Fixed support on outer pad faces (R > 295, mid-height zone)",
-    "LOCAL,11,1,0,0,0",
-    "CSYS,11",
-    "NSEL,S,LOC,X,295,400",
-    "NSEL,R,LOC,Z,400,600",
-    "CSYS,0",
-    "D,ALL,ALL",
-    "",
-    "NSEL,ALL",
-    "ALLS",
-])
+cmd.Input = '''! Material: Stainless Steel (Variant 13 exact values)
+MP,EX,1,193e3
+MP,PRXY,1,0.31
+MP,DENS,1,7.75e-9
+MP,ALPX,1,1.7e-5
 
-# -- Result objects -------------------------------------------------
+! Reference temperature for thermal strain
+TREF,22
+
+! Uniform temperature load: 75 C
+NSEL,ALL
+BF,ALL,TEMP,75
+
+! Gravity: Z-down (ACEL = reference frame acceleration)
+ACEL,0,0,9806.6
+
+! Fixed support on outer pad faces (R > 295, mid-height zone)
+LOCAL,11,1,0,0,0
+CSYS,11
+NSEL,S,LOC,X,295,400
+NSEL,R,LOC,Z,400,600
+CSYS,0
+D,ALL,ALL
+
+NSEL,ALL
+ALLS'''
+
+# -- Result objects --
 SOLN = analysis.Solution
 TOT_DEF = SOLN.AddTotalDeformation()
 EQV_STRS = SOLN.AddEquivalentStress()
 
-# -- Solve ----------------------------------------------------------
+# -- Solve --
 SOLN.Solve(True)
 SOLN.EvaluateAllResults()
 
-# -- Export result images -------------------------------------------
+# -- Export result images --
 TOT_DEF.Activate()
 Graphics.ExportImage(
     os.path.join(results_dir, "deformation.png"),
@@ -179,7 +179,7 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# -- Write results CSV ----------------------------------------------
+# -- Write results CSV --
 max_def = TOT_DEF.Maximum
 max_stress = EQV_STRS.Maximum
 try:
@@ -191,11 +191,15 @@ except:
 
 csv_path = os.path.join(results_dir, "summary.csv")
 with open(csv_path, "w") as f:
-    f.write("Parameter,Value,Unit\n")
-    f.write("Max Total Deformation,%s,mm\n" % max_def_val)
-    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
+    f.write("Parameter,Value,Unit\\n")
+    f.write("Max Total Deformation,%s,mm\\n" % max_def_val)
+    f.write("Max Equivalent Stress,%s,MPa\\n" % max_stress_val)
 
 print("Lab 1 complete. Results in: " + results_dir)
 print("Max Deformation: %s mm" % max_def_val)
 print("Max Stress: %s MPa" % max_stress_val)
+""".format(results_dir=results_dir.replace("\\", "/"))
+
+model_container.SendCommand(Language="Python", Command=mech_script)
+
 Save(Overwrite=True)
