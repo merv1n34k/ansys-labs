@@ -86,23 +86,15 @@ print("Bodies: %d" % len(all_bodies))
 for b in all_bodies:
     print("  '%s': Volume=%s" % (b.Name, b.Volume))
 
-# Discover face category
-face_cat = None
-for _attr in ['GeoFace', 'Face', 'GeometryFace']:
-    if hasattr(DataModelObjectCategory, _attr):
-        face_cat = getattr(DataModelObjectCategory, _attr)
-        print("Face category: %s" % _attr)
-        break
-if face_cat is None:
-    cats = [a for a in dir(DataModelObjectCategory) if not a.startswith('_')]
-    print("ERROR: No face category. Available: %s" % str(cats))
-
 vessel_body = all_bodies[0]
 coil_solid_body = all_bodies[1]
 coil_fluid_body = all_bodies[2]
 
 def get_faces(body):
-    return list(body.GetChildren(face_cat, True))
+    try:
+        return list(body.GetGeoBody().Faces)
+    except:
+        return list(body.Faces)
 
 def find_nozzle_face(faces, target_z, max_area):
     candidates = []
@@ -147,7 +139,7 @@ make_ns("Circuit_Outlet", co)
 
 # -- Mesh Settings --
 mesh = Model.Mesh
-mesh.ElementSize = Quantity("5 mm")
+mesh.ElementSize = Quantity("5 [mm]")
 
 vw = [f for f in vessel_faces if f not in vi and f not in vo]
 if vw:
@@ -157,7 +149,7 @@ if vw:
     inflation.Location = sel
     inflation.MaximumLayers = 3
     inflation.GrowthRate = 1.2
-    inflation.FirstLayerHeight = Quantity("0.5 mm")
+    inflation.FirstLayerHeight = Quantity("0.5 [mm]")
 
 mesh.GenerateMesh()
 

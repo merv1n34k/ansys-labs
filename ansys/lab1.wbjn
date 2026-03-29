@@ -81,7 +81,7 @@ vessel_body = all_bodies[0]
 
 # -- Mesh --
 mesh = Model.Mesh
-mesh.ElementSize = Quantity("10 mm")
+mesh.ElementSize = Quantity("10 [mm]")
 mesh.GenerateMesh()
 
 mesh.Activate()
@@ -91,21 +91,15 @@ Graphics.ExportImage(
     GraphicsImageExportSettings(Width=1920, Height=1080, Background=GraphicsBackgroundType.White),
 )
 
-# -- Discover face category --
-face_cat = None
-for _attr in ['GeoFace', 'Face', 'GeometryFace']:
-    if hasattr(DataModelObjectCategory, _attr):
-        face_cat = getattr(DataModelObjectCategory, _attr)
-        print("Face category: %s" % _attr)
-        break
-if face_cat is None:
-    cats = [a for a in dir(DataModelObjectCategory) if not a.startswith('_')]
-    print("ERROR: No face category. Available: %s" % str(cats))
+# -- Get faces via geometry API --
+def get_faces(body):
+    try:
+        return list(body.GetGeoBody().Faces)
+    except:
+        return list(body.Faces)
 
-# -- Identify faces for pressure BC --
-vessel_faces = list(vessel_body.GetChildren(
-    face_cat, True
-))
+vessel_faces = get_faces(vessel_body)
+print("Vessel faces: %d" % len(vessel_faces))
 
 inner_faces = []
 for f in vessel_faces:

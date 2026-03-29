@@ -58,21 +58,16 @@ mesh_header = "import os\n\n"
 mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
 
 mesh_body = r"""
-# Discover face category
-face_cat = None
-for _attr in ['GeoFace', 'Face', 'GeometryFace']:
-    if hasattr(DataModelObjectCategory, _attr):
-        face_cat = getattr(DataModelObjectCategory, _attr)
-        print("Face category: %s" % _attr)
-        break
-if face_cat is None:
-    cats = [a for a in dir(DataModelObjectCategory) if not a.startswith('_')]
-    print("ERROR: No face category. Available: %s" % str(cats))
+def get_faces(body):
+    try:
+        return list(body.GetGeoBody().Faces)
+    except:
+        return list(body.Faces)
 
 geo = Model.Geometry
 all_faces = []
 for body in geo.GetChildren(DataModelObjectCategory.Body, True):
-    for face in body.GetChildren(face_cat, True):
+    for face in get_faces(body):
         all_faces.append(face)
 
 print("Total faces: %d" % len(all_faces))
@@ -110,7 +105,7 @@ ns_wall.Location = sel
 
 # -- Mesh Settings --
 mesh = Model.Mesh
-mesh.ElementSize = Quantity("3 mm")
+mesh.ElementSize = Quantity("3 [mm]")
 
 # Inflation on walls for boundary layer resolution
 inflation = mesh.AddInflation()
@@ -119,7 +114,7 @@ sel.Entities = wall_faces
 inflation.Location = sel
 inflation.MaximumLayers = 5
 inflation.GrowthRate = 1.2
-inflation.FirstLayerHeight = Quantity("0.3 mm")
+inflation.FirstLayerHeight = Quantity("0.3 [mm]")
 
 # Refinement around cone (faces with centroid X between 100..200mm)
 cone_faces = [f for f in wall_faces
@@ -129,7 +124,7 @@ if cone_faces:
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Entities = cone_faces
     sizing.Location = sel
-    sizing.ElementSize = Quantity("1.5 mm")
+    sizing.ElementSize = Quantity("1.5 [mm]")
     print("Cone refinement: %d faces" % len(cone_faces))
 
 mesh.GenerateMesh()
