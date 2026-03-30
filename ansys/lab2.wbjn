@@ -5,6 +5,7 @@
 # Single fluid domain body after boolean subtract (pipe - cone).
 
 import os
+import time
 
 # -- Paths ----------------------------------------------------------
 root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
@@ -15,6 +16,14 @@ results_dir = os.path.join(root_dir, "results", "lab2")
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
+
+print("=" * 60)
+print("LAB 2 PIPELINE START")
+print("ROOT: " + root_dir)
+print("STEP: " + step_file)
+print("STEP exists: %s" % os.path.exists(step_file))
+print("STEP size: %d bytes" % os.path.getsize(step_file) if os.path.exists(step_file) else "N/A")
+print("=" * 60)
 
 # -- Create CFX system ---------------------------------------------
 template = None
@@ -41,102 +50,188 @@ if template is None:
     raise Exception("Could not find CFX template")
 
 system = template.CreateSystem()
+print("System created: %s" % system.DisplayText)
+
+# List all components in the system
+for comp_name in ["Geometry", "Mesh", "Setup", "Solution", "Results"]:
+    try:
+        comp = system.GetComponent(Name=comp_name)
+        print("  Component '%s': state=%s" % (comp_name, comp.GetState()))
+    except Exception as e:
+        print("  Component '%s': %s" % (comp_name, e))
 
 proj_path = os.path.join(project_dir, "lab2.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
+print("Project saved: %s" % proj_path)
 
 # -- Geometry Import -----------------------------------------------
+print("\n" + "=" * 60)
+print("GEOMETRY IMPORT")
+print("=" * 60)
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 geom_comp = system.GetComponent(Name="Geometry")
+print("Geometry state before refresh: %s" % geom_comp.GetState())
 geom_comp.Refresh()
+print("Geometry state after refresh: %s" % geom_comp.GetState())
 geom_comp.Update()
+print("Geometry state after update: %s" % geom_comp.GetState())
 
 # -- Write mesh script to .py file ---------------------------------
 mesh_path = os.path.join(project_dir, "lab2_mesh.py")
-mesh_header = "import os\n\n"
+mesh_header = "import os\nimport sys\n\n"
 mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
+mesh_header += "project_dir = r'%s'\n" % project_dir.replace("\\", "/")
 
 mesh_body = r"""
+print("=" * 60)
+print("MESH SCRIPT START (inside Mechanical)")
+print("=" * 60)
+
+# -- Enumerate all geometry --
+geo = Model.Geometry
+print("Geometry children categories:")
+for cat_name in dir(DataModelObjectCategory):
+    if not cat_name.startswith('_'):
+        try:
+            cat = getattr(DataModelObjectCategory, cat_name)
+            children = geo.GetChildren(cat, True)
+            if children:
+                print("  %s: %d items" % (cat_name, len(list(children))))
+        except:
+            pass
+
+all_bodies = list(geo.GetChildren(DataModelObjectCategory.Body, True))
+print("\nBodies: %d" % len(all_bodies))
+for b in all_bodies:
+    print("  '%s': Volume=%s" % (b.Name, b.Volume))
+    # Try to access GeoBody
+    try:
+        gb = b.GetGeoBody()
+        print("    GeoBody: Id=%s Faces=%d" % (gb.Id, len(list(gb.Faces))))
+    except Exception as e:
+        print("    GeoBody FAILED: %s" % e)
+
+# -- Get faces via GeoBody API --
 def get_faces(body):
     faces = list(body.GetGeoBody().Faces)
     print("Faces for '%s': %d" % (body.Name, len(faces)))
+    for f in faces:
+        print("  Face Id=%d centroid=(%.2f, %.2f, %.2f) area=%.2f" % (
+            f.Id, f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
     return faces
 
-geo = Model.Geometry
 all_faces = []
-for body in geo.GetChildren(DataModelObjectCategory.Body, True):
+for body in all_bodies:
     for face in get_faces(body):
         all_faces.append(face)
 
-print("Total faces: %d" % len(all_faces))
-for f in all_faces:
-    print("  Face: centroid=(%s, %s, %s) area=%s" % (
-        f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
+print("\nTotal faces: %d" % len(all_faces))
 
-# Inlet: circular face at X=0 (pipe start)
+# -- Classify faces --
 inlet_faces = [f for f in all_faces if abs(f.Centroid[0]) < 0.5]
-# Outlet: circular face at X=300 (pipe end)
 outlet_faces = [f for f in all_faces if abs(f.Centroid[0] - 300) < 0.5]
-# Wall: all other faces (cylindrical pipe wall + cone surface)
 wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_faces]
 
-print("Inlet faces: %d, Outlet faces: %d, Wall faces: %d" % (
-    len(inlet_faces), len(outlet_faces), len(wall_faces)))
+print("\n--- FACE CLASSIFICATION ---")
+print("Inlet: %d faces, IDs=%s" % (len(inlet_faces), [f.Id for f in inlet_faces]))
+print("Outlet: %d faces, IDs=%s" % (len(outlet_faces), [f.Id for f in outlet_faces]))
+print("Wall: %d faces, IDs=%s" % (len(wall_faces), [f.Id for f in wall_faces]))
+
+# -- Create Named Selections --
+print("\n--- NAMED SELECTION CREATION ---")
 
 def make_ns(name, faces):
+    ids = [f.Id for f in faces]
+    print("Creating NS '%s' with %d face IDs: %s" % (name, len(ids), ids))
     ns = Model.AddNamedSelection()
     ns.Name = name
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-    ids = [f.Id for f in faces]
     sel.Ids = ids
     ns.Location = sel
+    # Try Generate
     try:
         ns.Generate()
+        print("  Generate() OK")
     except Exception as e:
-        print("NS '%s' Generate() failed: %s" % (name, e))
-    # Diagnostic: check what Mechanical sees
+        print("  Generate() exception: %s" % e)
+    # Read back diagnostics
     try:
-        loc = ns.Location
-        print("NS '%s': IDs=%s Location=%s State=%s" % (name, ids, loc, ns.ObjectState))
+        print("  ObjectState: %s" % ns.ObjectState)
     except Exception as e:
-        print("NS '%s': IDs=%s (diag failed: %s)" % (name, ids, e))
+        print("  ObjectState read failed: %s" % e)
+    try:
+        print("  ScopingMethod: %s" % ns.ScopingMethod)
+    except:
+        pass
+    try:
+        print("  Location: %s" % ns.Location)
+    except:
+        pass
+    try:
+        children = ns.GetChildren(DataModelObjectCategory.Body, True)
+        print("  Children (Body): %d" % len(list(children)))
+    except:
+        pass
     return ns
 
 make_ns("Inlet", inlet_faces)
 make_ns("Outlet", outlet_faces)
 make_ns("Wall", wall_faces)
 
+# -- Verify: list all Named Selections in the model --
+print("\n--- ALL NAMED SELECTIONS IN MODEL ---")
+try:
+    all_ns = Model.NamedSelections.GetChildren(DataModelObjectCategory.NamedSelection, True)
+    for ns_item in all_ns:
+        print("  NS: '%s' State=%s" % (ns_item.Name, ns_item.ObjectState))
+except Exception as e:
+    print("  Could not list Named Selections: %s" % e)
+
 # -- Mesh Settings --
+print("\n--- MESH GENERATION ---")
 mesh = Model.Mesh
 mesh.PhysicsPreference = MeshPhysicsPreferenceType.CFD
 mesh.SolverPreference = MeshSolverPreferenceType.CFX
 mesh.ElementSize = Quantity("3 [mm]")
+print("Mesh settings: CFD/CFX, ElementSize=3mm")
 
 # Inflation on walls for boundary layer resolution
-inflation = mesh.AddInflation()
-sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-sel.Ids = [f.Id for f in wall_faces]
-inflation.Location = sel
-inflation.MaximumLayers = 5
-inflation.GrowthRate = 1.2
-inflation.FirstLayerHeight = Quantity("0.3 [mm]")
-
-# Refinement around cone (faces with centroid X between 100..200mm)
-cone_faces = [f for f in wall_faces
-              if 100 < f.Centroid[0] < 200 and f not in inlet_faces and f not in outlet_faces]
-if cone_faces:
-    sizing = mesh.AddSizing()
+try:
+    inflation = mesh.AddInflation()
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-    sel.Ids = [f.Id for f in cone_faces]
-    sizing.Location = sel
-    sizing.ElementSize = Quantity("1.5 [mm]")
-    print("Cone refinement: %d faces" % len(cone_faces))
+    sel.Ids = [f.Id for f in wall_faces]
+    inflation.Location = sel
+    inflation.MaximumLayers = 5
+    inflation.GrowthRate = 1.2
+    inflation.FirstLayerHeight = Quantity("0.3 [mm]")
+    print("Inflation added: 5 layers, GR=1.2, FirstLayer=0.3mm")
+except Exception as e:
+    print("Inflation FAILED: %s" % e)
+
+# Refinement around cone
+cone_faces = [f for f in wall_faces
+              if 100 < f.Centroid[0] < 200]
+if cone_faces:
+    try:
+        sizing = mesh.AddSizing()
+        sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+        sel.Ids = [f.Id for f in cone_faces]
+        sizing.Location = sel
+        sizing.ElementSize = Quantity("1.5 [mm]")
+        print("Cone refinement: %d faces, 1.5mm" % len(cone_faces))
+    except Exception as e:
+        print("Cone refinement FAILED: %s" % e)
 
 mesh.GenerateMesh()
-print("Mesh generated: Elements=%s Nodes=%s" % (mesh.Elements, mesh.Nodes))
+print("Mesh generated!")
+try:
+    print("  Elements: %s" % mesh.Elements)
+    print("  Nodes: %s" % mesh.Nodes)
+except Exception as e:
+    print("  Mesh stats failed: %s" % e)
 
-# Image export (non-critical, wrapped in try/except)
+# -- Mesh image (non-critical) --
 try:
     image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
     image_settings.CurrentGraphicsDisplay = False
@@ -148,11 +243,15 @@ try:
     Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
     Graphics.ViewOptions.ShowLegend = False
     Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
-    print("Mesh image exported")
+    print("Mesh image: OK")
 except Exception as e:
-    print("Mesh image export failed (non-critical): %s" % e)
+    print("Mesh image FAILED (non-critical): %s" % e)
 
-print("Mesh script done")
+# Write success marker
+open(os.path.join(project_dir, "mesh_done.txt"), "w").write("OK")
+print("\n" + "=" * 60)
+print("MESH SCRIPT DONE")
+print("=" * 60)
 """
 
 with open(mesh_path, "w") as f:
@@ -160,13 +259,22 @@ with open(mesh_path, "w") as f:
     f.write(mesh_body)
 
 # -- Meshing via Mechanical -----------------------------------------
+print("\n" + "=" * 60)
+print("RUNNING MESH SCRIPT IN MECHANICAL")
+print("=" * 60)
+
 mesh_component = system.GetComponent(Name="Mesh")
+print("Mesh component state before: %s" % mesh_component.GetState())
 mesh_component.Refresh()
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
 
 error_path = os.path.join(project_dir, "lab2_mesh_error.txt")
+# Remove stale error file
+if os.path.exists(error_path):
+    os.remove(error_path)
+
 wrapper_path = os.path.join(project_dir, "lab2_mesh_wrapper.py")
 with open(wrapper_path, "w") as f:
     f.write("import traceback\n")
@@ -179,14 +287,50 @@ with open(wrapper_path, "w") as f:
 model.SendCommand(Language="Python",
     Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
 
+print("SendCommand returned")
+
 if os.path.exists(error_path):
-    print("ERROR in mesh script:")
+    print("*** ERROR in mesh script: ***")
     with open(error_path) as ef:
         print(ef.read())
+else:
+    print("No error file -- mesh script completed")
+
+mesh_done = os.path.join(project_dir, "mesh_done.txt")
+if os.path.exists(mesh_done):
+    print("mesh_done.txt exists -- mesh script ran to completion")
+else:
+    print("WARNING: mesh_done.txt missing -- script may have crashed")
+
+# Check mesh component state after script
+print("Mesh component state after: %s" % mesh_component.GetState())
+
+# Explicitly update mesh component
+try:
+    mesh_component.Update()
+    print("Mesh component updated: %s" % mesh_component.GetState())
+except Exception as e:
+    print("Mesh component update: %s" % e)
+
+# Save project after mesh
+Save(Overwrite=True)
+print("Project saved after mesh")
+
+# List project files
+print("\n--- PROJECT DIR FILES ---")
+for fn in sorted(os.listdir(project_dir)):
+    fpath = os.path.join(project_dir, fn)
+    sz = os.path.getsize(fpath) if os.path.isfile(fpath) else -1
+    print("  %s (%d bytes)" % (fn, sz))
 
 # -- CFX-Pre Setup ------------------------------------------------
+print("\n" + "=" * 60)
+print("CFX-PRE SETUP")
+print("=" * 60)
+
 setup = system.GetContainer(ComponentName="Setup")
 setup.Edit()
+print("CFX-Pre container opened")
 
 ccl_content = """
 FLOW: Flow Analysis 1
@@ -307,65 +451,159 @@ END
 ccl_path = os.path.join(project_dir, "lab2_setup.ccl")
 with open(ccl_path, "w") as f:
     f.write(ccl_content)
+print("CCL written to: %s" % ccl_path)
 
-# Send CCL directly (importCCL file command is broken in WB 2024 R1)
 setup.SendCommand(Command=ccl_content)
+print("CCL sent to CFX-Pre")
 
 # -- Solve ---------------------------------------------------------
+print("\n" + "=" * 60)
+print("SOLVER")
+print("=" * 60)
+
 setup_comp = system.GetComponent(Name="Setup")
+print("Setup component state: %s" % setup_comp.GetState())
 print("Updating Setup component...")
+t0 = time.time()
 try:
     setup_comp.Update()
-    print("Setup updated: state=%s" % setup_comp.GetState())
+    print("Setup updated in %.1fs: state=%s" % (time.time() - t0, setup_comp.GetState()))
 except Exception as e:
-    print("Setup Update FAILED: %s" % e)
+    print("Setup Update FAILED in %.1fs: %s" % (time.time() - t0, e))
 
 solution_comp = system.GetComponent(Name="Solution")
-print("Updating Solution component...")
+print("Solution component state: %s" % solution_comp.GetState())
+print("Updating Solution component (this runs the CFX solver)...")
+t0 = time.time()
 try:
     solution_comp.Update()
-    print("Solution updated: state=%s" % solution_comp.GetState())
+    print("Solution updated in %.1fs: state=%s" % (time.time() - t0, solution_comp.GetState()))
 except Exception as e:
-    print("Solution Update FAILED: %s" % e)
+    print("Solution Update FAILED in %.1fs: %s" % (time.time() - t0, e))
+
+Save(Overwrite=True)
+print("Project saved after solve")
+
+# Check for solver output files
+print("\n--- SOLVER OUTPUT FILES ---")
+for dirpath, dirnames, filenames in os.walk(project_dir):
+    for fn in filenames:
+        if fn.endswith(('.res', '.trn', '.def', '.out', '.mres', '.dir')):
+            fpath = os.path.join(dirpath, fn)
+            print("  %s (%d bytes)" % (fpath, os.path.getsize(fpath)))
+
+# Check all component states
+print("\n--- COMPONENT STATES AFTER SOLVE ---")
+for comp_name in ["Geometry", "Mesh", "Setup", "Solution", "Results"]:
+    try:
+        comp = system.GetComponent(Name=comp_name)
+        print("  %s: %s" % (comp_name, comp.GetState()))
+    except Exception as e:
+        print("  %s: %s" % (comp_name, e))
 
 # -- CFX-Post ------------------------------------------------------
+print("\n" + "=" * 60)
+print("CFX-POST")
+print("=" * 60)
+
 results = system.GetContainer(ComponentName="Results")
 results.Edit()
+print("CFX-Post container opened")
 
 rd = results_dir.replace('\\', '/')
 
+# -- Debug: dump all available domains, boundaries, variables --
+debug_script = """
+!open(my $dbg, '>', '%s/cfxpost_debug.txt') or die "Cannot open debug file: $!";
+!print $dbg "=== CFX-Post Debug ===\\n";
+!print $dbg "Timestamp: " . localtime() . "\\n\\n";
+
+!# List all child objects at root
+!my @root = getChildNames("/");
+!print $dbg "Root objects:\\n";
+!foreach my $r (@root) { print $dbg "  $r\\n"; }
+!print $dbg "\\n";
+
+!# List all domains
+!my @domains;
+!eval { @domains = getChildNames("/DOMAIN"); };
+!if ($@) { print $dbg "getChildNames(/DOMAIN) error: $@\\n"; }
+!else {
+!  print $dbg "Domains:\\n";
+!  foreach my $d (@domains) { print $dbg "  $d\\n"; }
+!}
+!print $dbg "\\n";
+
+!# List all boundaries
+!eval { my @bnds = getChildNames("/BOUNDARY"); print $dbg "Boundaries:\\n"; foreach my $b (@bnds) { print $dbg "  $b\\n"; } };
+!print $dbg "\\n";
+
+!# List all regions
+!eval { my @regs = getChildNames("/REGION"); print $dbg "Regions:\\n"; foreach my $r (@regs) { print $dbg "  $r\\n"; } };
+!print $dbg "\\n";
+
+!# List all variables
+!my @vars;
+!eval { @vars = getExportVarNames(); };
+!if ($@) { print $dbg "getExportVarNames() error: $@\\n"; }
+!else {
+!  print $dbg "Export variables:\\n";
+!  foreach my $v (@vars) { print $dbg "  $v\\n"; }
+!}
+!print $dbg "\\n";
+
+!# List all locations
+!eval { my @locs = getLocNames(); print $dbg "Locations:\\n"; foreach my $l (@locs) { print $dbg "  $l\\n"; } };
+!print $dbg "\\n";
+
+!# Test evaluate with simple expression
+!eval { my $test = evaluate("1+1"); print $dbg "evaluate('1+1') = $test\\n"; };
+!if ($@) { print $dbg "evaluate test error: $@\\n"; }
+
+!# Test domain-specific evaluations
+!eval { my $v = evaluate("maxVal(Velocity)@Default Domain"); print $dbg "maxVal(Velocity)\@Default Domain = $v\\n"; };
+!if ($@) { print $dbg "maxVal(Velocity) error: $@\\n"; }
+
+!eval { my $v = evaluate("areaAve(Velocity)@Inlet"); print $dbg "areaAve(Velocity)\@Inlet = $v\\n"; };
+!if ($@) { print $dbg "areaAve(Velocity)\@Inlet error: $@\\n"; }
+
+!close($dbg);
+!print "CFX-Post debug written to %s/cfxpost_debug.txt\\n";
+""" % (rd, rd)
+
+results.SendCommand(Command=debug_script)
+
+# Read and print the debug file
+debug_file = os.path.join(results_dir, "cfxpost_debug.txt")
+if os.path.exists(debug_file):
+    print("--- CFX-POST DEBUG DUMP ---")
+    with open(debug_file) as df:
+        print(df.read())
+else:
+    print("WARNING: cfxpost_debug.txt was not created")
+
+# -- Create visualization objects --
+# Cross-section plane at Y=0 (XZ mid-plane through pipe center)
 post_ccl = """
 PLANE: MidPlane
   Option = XZ Plane
   Y = 0 [mm]
 END
 
-CONTOUR: Velocity
+CONTOUR: VelocityContour
   Colour Variable = Velocity
   Location = MidPlane
   Range = Local
 END
 
-CONTOUR: Pressure
+CONTOUR: PressureContour
   Colour Variable = Pressure
   Location = MidPlane
   Range = Local
 END
 
-CONTOUR: SSR
-  Colour Variable = Shear Strain Rate
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: TKE
+CONTOUR: TKEContour
   Colour Variable = Turbulence Kinetic Energy
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: TEF
-  Colour Variable = Turbulence Eddy Frequency
   Location = MidPlane
   Range = Local
 END
@@ -377,17 +615,15 @@ STREAMLINE: Streamlines
   Option = From Boundary
 END
 
-VECTOR: Vectors
+VECTOR: VelocityVectors
   Location = MidPlane
   Variable = Velocity
 END
 """
-post_ccl_path = os.path.join(project_dir, "lab2_post.ccl")
-with open(post_ccl_path, "w") as f:
-    f.write(post_ccl)
 results.SendCommand(Command=post_ccl)
+print("Post-processing objects created (plane, contours, streamlines, vectors)")
 
-# Configure image export settings
+# Configure image export
 results.SendCommand(Command="""HARDCOPY:
   Hardcopy Format = png
   White Background = On
@@ -396,13 +632,48 @@ results.SendCommand(Command="""HARDCOPY:
   Image Height = 1080
 END""")
 
-for name in ["Velocity", "Pressure", "SSR", "TKE", "TEF", "Streamlines", "Vectors"]:
-    fname = name.lower().replace("streamlines", "streamline").replace("vectors", "vector")
-    results.SendCommand(Command='> show %s' % name)
-    results.SendCommand(Command='>print %s/%s.png' % (rd, fname))
+# Export images -- each contour on the mid-plane
+for obj_name, fname in [
+    ("VelocityContour", "velocity"),
+    ("PressureContour", "pressure"),
+    ("TKEContour", "tke"),
+    ("Streamlines", "streamlines"),
+    ("VelocityVectors", "vectors"),
+]:
+    try:
+        results.SendCommand(Command='> hide /CONTOUR:VelocityContour')
+        results.SendCommand(Command='> hide /CONTOUR:PressureContour')
+        results.SendCommand(Command='> hide /CONTOUR:TKEContour')
+        results.SendCommand(Command='> hide /STREAMLINE:Streamlines')
+        results.SendCommand(Command='> hide /VECTOR:VelocityVectors')
+        if obj_name.startswith("Velocity") and "Vector" not in obj_name:
+            results.SendCommand(Command='> show /CONTOUR:%s' % obj_name)
+        elif obj_name == "PressureContour":
+            results.SendCommand(Command='> show /CONTOUR:%s' % obj_name)
+        elif obj_name == "TKEContour":
+            results.SendCommand(Command='> show /CONTOUR:%s' % obj_name)
+        elif obj_name == "Streamlines":
+            results.SendCommand(Command='> show /STREAMLINE:%s' % obj_name)
+        elif obj_name == "VelocityVectors":
+            results.SendCommand(Command='> show /VECTOR:%s' % obj_name)
+        results.SendCommand(Command='>print %s/%s.png' % (rd, fname))
+        print("Exported: %s.png" % fname)
+    except Exception as e:
+        print("Export %s FAILED: %s" % (fname, e))
 
-results.SendCommand(Command='>print %s/geometry.png' % rd)
+# Combined: streamlines + velocity contour on plane
+try:
+    results.SendCommand(Command='> hide /CONTOUR:PressureContour')
+    results.SendCommand(Command='> hide /CONTOUR:TKEContour')
+    results.SendCommand(Command='> hide /VECTOR:VelocityVectors')
+    results.SendCommand(Command='> show /CONTOUR:VelocityContour')
+    results.SendCommand(Command='> show /STREAMLINE:Streamlines')
+    results.SendCommand(Command='>print %s/velocity_streamlines.png' % rd)
+    print("Exported: velocity_streamlines.png")
+except Exception as e:
+    print("Combined export FAILED: %s" % e)
 
+# -- CSV with quantitative results --
 calc_pairs = [
     ("maxVal", "Velocity", "Default Domain", "m s^-1"),
     ("areaAve", "Velocity", "Inlet", "m s^-1"),
@@ -415,7 +686,6 @@ calc_pairs = [
     ("maxVal", "Turbulence Eddy Frequency", "Default Domain", "s^-1"),
 ]
 
-# Use CFX-Post Power Syntax (Perl) to evaluate and write CSV with values
 power_lines = [
     "!open(my $fh, '>', '%s/calc.csv') or die;" % rd,
     '!print $fh "Function,Variable,Location,Unit,Value\\n";',
@@ -429,5 +699,17 @@ power_lines.append('!close($fh);')
 
 results.SendCommand(Command='\n'.join(power_lines))
 
-print("Lab 2 complete. Results in: " + results_dir)
+# Check what result files were created
+print("\n--- RESULTS DIR ---")
+if os.path.exists(results_dir):
+    for fn in sorted(os.listdir(results_dir)):
+        fpath = os.path.join(results_dir, fn)
+        sz = os.path.getsize(fpath) if os.path.isfile(fpath) else -1
+        print("  %s (%d bytes)" % (fn, sz))
+else:
+    print("  results dir does not exist!")
+
+print("\n" + "=" * 60)
+print("LAB 2 COMPLETE")
+print("=" * 60)
 Save(Overwrite=True)
