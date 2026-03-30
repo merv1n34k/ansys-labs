@@ -1,6 +1,8 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 1: Static Structural (Variant 13)
-# Uses Static Structural template with STEP geometry import
 # Run: runwb2 -R ansys/lab1.wbjn
+#
+# Sets up Static Structural: imports STEP, meshes, applies BCs.
+# After script: open .wbpj, verify setup, click Solve.
 
 import os
 
@@ -10,39 +12,17 @@ step_file = os.path.join(root_dir, "geometry", "step", "lab1.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab1")
 results_dir = os.path.join(root_dir, "results", "lab1")
 
-print("ROOT: " + root_dir)
-print("STEP: " + step_file)
-print("STEP exists: " + str(os.path.exists(step_file)))
-
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
+print("=" * 60)
+print("LAB 1 SETUP")
+print("STEP: " + step_file + " (exists=%s)" % os.path.exists(step_file))
+print("=" * 60)
+
 # -- Create Static Structural system --------------------------------
-template = None
-errors = []
-for name, solver in [("Static Structural", "ANSYS"),
-                     ("Static Structural", "Mechanical APDL"),
-                     ("Static Structural", None),
-                     ("Static Structural (ANSYS)", None),
-                     ("Structural Analysis", "ANSYS"),
-                     ("Structural Analysis", None)]:
-    try:
-        if solver:
-            template = GetTemplate(TemplateName=name, Solver=solver)
-        else:
-            template = GetTemplate(TemplateName=name)
-        print("Found template: '%s' (solver=%s)" % (name, solver))
-        break
-    except Exception as e:
-        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
-
-if template is None:
-    print("All template attempts failed:")
-    for err in errors:
-        print(err)
-    raise Exception("Could not find Static Structural template")
-
+template = GetTemplate(TemplateName="Static Structural", Solver="ANSYS")
 system = template.CreateSystem()
 
 proj_path = os.path.join(project_dir, "lab1.wbpj")
@@ -60,8 +40,6 @@ geom_comp.Refresh()
 geom_comp.Update()
 
 # -- Write Mechanical script to .py file ----------------------------
-# SendCommand(Language="Python") executes Python inside Mechanical.
-# We write to a file and use execfile() to avoid string escaping issues.
 mech_path = os.path.join(project_dir, "lab1_mech.py")
 mech_header = "import os\nimport math\n\n"
 mech_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
@@ -84,19 +62,24 @@ pad_body = all_bodies[1] if len(all_bodies) > 1 else None
 mesh = Model.Mesh
 mesh.ElementSize = Quantity("10 [mm]")
 mesh.GenerateMesh()
+print("Mesh generated")
 
-image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
-image_settings.Background = GraphicsBackgroundType.White
-image_settings.Width = 1920
-image_settings.Height = 1080
+try:
+    image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
+    image_settings.CurrentGraphicsDisplay = False
+    image_settings.Background = GraphicsBackgroundType.White
+    image_settings.Width = 1920
+    image_settings.Height = 1080
+    mesh.Activate()
+    Graphics.Camera.SetFit()
+    Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+    Graphics.ViewOptions.ShowLegend = False
+    Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
+    print("Mesh image exported")
+except Exception as e:
+    print("Mesh image failed (non-critical): %s" % e)
 
-mesh.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = False
-Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
-
-# -- Get faces via GeoBody API (use .Id for SelectionInfo) --
+# -- Get faces via GeoBody API --
 def get_faces(body):
     faces = list(body.GetGeoBody().Faces)
     print("Faces for '%s': %d" % (body.Name, len(faces)))
@@ -107,9 +90,7 @@ R_IN = 247.9
 SHELL_H = 1000.0
 PAD_W = 50.0
 
-# Vessel inner faces for pressure
 vessel_faces = get_faces(vessel_body)
-print("Vessel faces: %d" % len(vessel_faces))
 for f in vessel_faces:
     r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
     print("  Vessel face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
@@ -122,19 +103,14 @@ for f in vessel_faces:
         inner_faces.append(f)
 print("Inner vessel faces (pressure): %d" % len(inner_faces))
 
-# Pad outer faces for fixed support
 pad_outer_faces = []
 if pad_body:
     pad_faces = get_faces(pad_body)
-    print("Pad body faces: %d" % len(pad_faces))
     for f in pad_faces:
         r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
-        print("  Pad face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
         if r > R_OUT + PAD_W * 0.8:
             pad_outer_faces.append(f)
     print("Pad outer faces for fixed support: %d" % len(pad_outer_faces))
-else:
-    print("WARNING: no pad body found, only %d bodies" % len(all_bodies))
 
 # -- Named Selections --
 ns_pressure = Model.AddNamedSelection()
@@ -142,10 +118,6 @@ ns_pressure.Name = "InnerFaces"
 sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
 sel.Ids = [f.Id for f in inner_faces]
 ns_pressure.Location = sel
-try:
-    ns_pressure.Generate()
-except:
-    pass
 
 ns_pads = None
 if pad_outer_faces:
@@ -154,49 +126,34 @@ if pad_outer_faces:
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Ids = [f.Id for f in pad_outer_faces]
     ns_pads.Location = sel
-    try:
-        ns_pads.Generate()
-    except:
-        pass
 
-# -- Boundary Conditions (all via WB Mechanical API) --
+# -- Boundary Conditions --
 analysis = Model.Analyses[0]
 
-# 1. Pressure on inner faces
 PRESSURE = analysis.AddPressure()
 PRESSURE.Location = ns_pressure
 PRESSURE.Magnitude.Output.DiscreteValues = [Quantity("1.1 [MPa]")]
 print("BC: Pressure 1.1 MPa on %d inner faces" % len(inner_faces))
 
-# 2. Fixed support on pad outer faces
 FIXED = None
 if ns_pads:
     FIXED = analysis.AddFixedSupport()
     FIXED.Location = ns_pads
     print("BC: Fixed support on %d pad outer faces" % len(pad_outer_faces))
-else:
-    print("ERROR: no pad outer faces for fixed support!")
 
-# 3. Gravity via AddAcceleration (positive Z = inertial force in -Z = gravity down)
-ACCEL = None
 try:
     ACCEL = analysis.AddAcceleration()
     ACCEL.DefineBy = LoadDefineBy.Components
     ACCEL.ZComponent.Output.DiscreteValues = [Quantity("9806.6 [mm sec^-1 sec^-1]")]
     print("BC: Acceleration Z=+9806.6 mm/s^2 (gravity -Z)")
 except Exception as e:
-    print("AddAcceleration failed: %s, trying AddEarthGravity" % e)
+    print("AddAcceleration failed: %s" % e)
     try:
         ACCEL = analysis.AddEarthGravity()
-        try:
-            ACCEL.Direction = GravityOrientationType.NegativeZDirection
-        except:
-            pass
         print("BC: Earth gravity applied")
     except Exception as e2:
         print("ERROR: could not add gravity: %s" % e2)
 
-# 4. Thermal: reference temp 22C, body temp 75C
 try:
     analysis.EnvironmentTemperature = Quantity("22 [C]")
     print("Reference temperature: 22 C")
@@ -210,77 +167,23 @@ TEMP.Location = body_sel
 TEMP.Magnitude.Output.DiscreteValues = [Quantity("75 [C]")]
 print("BC: Thermal condition 75 C on %d bodies" % len(all_bodies))
 
-# -- Diagnostics: check BC ObjectState --
-print("--- BC Diagnostics ---")
-for bc_name, bc_obj in [("Pressure", PRESSURE), ("FixedSupport", FIXED),
-                         ("Acceleration", ACCEL), ("Thermal", TEMP)]:
-    if bc_obj is None:
-        print("  %s: NOT CREATED" % bc_name)
-        continue
-    try:
-        print("  %s: state=%s" % (bc_name, bc_obj.ObjectState))
-    except:
-        print("  %s: could not read state" % bc_name)
-
-# -- Result objects --
+# -- Result objects (pre-create so they appear in tree) --
 SOLN = analysis.Solution
 TOT_DEF = SOLN.AddTotalDeformation()
 EQV_STRS = SOLN.AddEquivalentStress()
+print("Result objects created (Total Deformation, Equivalent Stress)")
 
-# -- Solve --
-SOLN.Solve(True)
-SOLN.EvaluateAllResults()
-
-# -- Export result images --
-TOT_DEF.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = True
-Graphics.ViewOptions.ResultPreference.ShowMinimum = True
-Graphics.ViewOptions.ResultPreference.ShowMaximum = True
-Graphics.ExportImage(os.path.join(results_dir, "deformation.png"), GraphicsImageExportFormat.PNG, image_settings)
-
-EQV_STRS.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = True
-Graphics.ViewOptions.ResultPreference.ShowMinimum = True
-Graphics.ViewOptions.ResultPreference.ShowMaximum = True
-Graphics.ExportImage(os.path.join(results_dir, "stress.png"), GraphicsImageExportFormat.PNG, image_settings)
-
-# -- Write results CSV --
-max_def = TOT_DEF.Maximum
-max_stress = EQV_STRS.Maximum
-try:
-    max_def_val = max_def.Value
-    max_stress_val = max_stress.Value
-except:
-    max_def_val = max_def
-    max_stress_val = max_stress
-
-csv_path = os.path.join(results_dir, "summary.csv")
-with open(csv_path, "w") as f:
-    f.write("Parameter,Value,Unit\n")
-    f.write("Max Total Deformation,%s,mm\n" % max_def_val)
-    f.write("Max Equivalent Stress,%s,MPa\n" % max_stress_val)
-
-# Write success marker
-open(os.path.join(results_dir, "done.txt"), "w").write("Lab 1 complete")
-print("Lab 1 complete. Results in: " + results_dir)
-print("Max Deformation: %s mm" % max_def_val)
-print("Max Stress: %s MPa" % max_stress_val)
+print("Setup complete - solve manually in GUI")
 """
 
 with open(mech_path, "w") as f:
     f.write(mech_header)
     f.write(mech_body)
-print("Mechanical script: " + mech_path)
 
 # -- Open Mechanical and execute script -----------------------------
 model_container = system.GetContainer(ComponentName="Model")
 model_container.Edit(Interactive=True)
-print("Executing Mechanical script via SendCommand...")
-# Write wrapper with error capture
+
 error_path = os.path.join(project_dir, "lab1_error.txt")
 wrapper_path = os.path.join(project_dir, "lab1_wrapper.py")
 with open(wrapper_path, "w") as f:
@@ -293,17 +196,23 @@ with open(wrapper_path, "w") as f:
 
 model_container.SendCommand(Language="Python",
     Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
-print("SendCommand returned")
 
-# Check results
-done_path = os.path.join(results_dir, "done.txt")
-if os.path.exists(done_path):
-    print("SUCCESS: Mechanical script completed")
-elif os.path.exists(error_path):
+if os.path.exists(error_path):
     print("ERROR in Mechanical script:")
     with open(error_path) as ef:
         print(ef.read())
-else:
-    print("WARNING: no done.txt or error.txt -- script may not have run")
 
+model_container.Exit()
 Save(Overwrite=True)
+
+print("")
+print("=" * 60)
+print("SETUP COMPLETE")
+print("=" * 60)
+print("Project saved: %s" % proj_path)
+print("Next steps (manual):")
+print("  1. Open %s in Workbench" % proj_path)
+print("  2. Double-click Model to open Mechanical")
+print("  3. Click Solve")
+print("  4. Export result images from Total Deformation / Equivalent Stress")
+print("=" * 60)

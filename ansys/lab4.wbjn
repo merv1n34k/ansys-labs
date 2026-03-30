@@ -1,13 +1,9 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 4: CFX Transient Ultrasound (Variant 13)
 # Run: runwb2 -R ansys/lab4.wbjn
 #
-# Geometry: stadium (capsule) bath, single fluid body.
-# Emitter: circular face at Z=5mm (top of recess), D=40mm, area ~1257 mm^2.
-# Variant 13: f=23kHz, A=1.3um.
-#
-# CRITICAL: Uses custom CompressibleWater material with Linear Elastic EOS
-# (speed of sound 1480 m/s) -- library Water is incompressible and cannot
-# propagate acoustic waves.
+# 3-system architecture (Geometry + Mesh + CFX). Single fluid body.
+# Ultrasound bath: f=23kHz, A=1.3um, CompressibleWater with Linear Elastic EOS.
+# After script: open .wbpj and click Solve.
 
 import os
 import math
@@ -26,43 +22,48 @@ EMITTER_DEPTH = 5.0
 EMITTER_D = 40.0
 EMITTER_AREA = math.pi * (EMITTER_D / 2.0) ** 2
 
-# -- Create CFX system ---------------------------------------------
-template = None
-errors = []
-for name, solver in [("Fluid Flow (CFX)", "CFX"),
-                     ("Fluid Flow (CFX)", None),
-                     ("CFX", "CFX"),
-                     ("CFX", None),
-                     ("Fluid Flow", "CFX")]:
-    try:
-        if solver:
-            template = GetTemplate(TemplateName=name, Solver=solver)
-        else:
-            template = GetTemplate(TemplateName=name)
-        print("Found template: '%s' (solver=%s)" % (name, solver))
-        break
-    except Exception as e:
-        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
+print("=" * 60)
+print("LAB 4 SETUP")
+print("STEP: " + step_file + " (exists=%s)" % os.path.exists(step_file))
+print("=" * 60)
 
-if template is None:
-    print("All CFX template attempts failed:")
-    for err in errors:
-        print(err)
-    raise Exception("Could not find CFX template")
+# ==================================================================
+# 1. CREATE 3 SYSTEMS: Geometry -> Mesh -> CFX
+# ==================================================================
+SetScriptVersion(Version="24.1.144")
 
-system = template.CreateSystem()
+geo_tmpl = GetTemplate(TemplateName="Geometry")
+sys_geo = geo_tmpl.CreateSystem()
+
+mesh_tmpl = GetTemplate(TemplateName="Mesh")
+sys_mesh = mesh_tmpl.CreateSystem(Position="Right", RelativeTo=sys_geo)
+
+cfx_tmpl = GetTemplate(TemplateName="CFX")
+sys_cfx = cfx_tmpl.CreateSystem(Position="Right", RelativeTo=sys_mesh)
+
+geo_comp = sys_geo.GetComponent(Name="Geometry")
+mesh_comp = sys_mesh.GetComponent(Name="Mesh")
+geo_comp.TransferData(TargetComponent=mesh_comp)
+
+setup_comp = sys_cfx.GetComponent(Name="Setup")
+mesh_comp.TransferData(TargetComponent=setup_comp)
+
+print("3 systems created and connected")
+
+# ==================================================================
+# 2. GEOMETRY IMPORT
+# ==================================================================
+geo_container = sys_geo.GetContainer(ComponentName="Geometry")
+geo_container.SetFile(FilePath=step_file)
+mesh_comp.Refresh()
+print("Geometry imported")
 
 proj_path = os.path.join(project_dir, "lab4.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# -- Geometry Import -----------------------------------------------
-geometry = system.GetContainer(ComponentName="Geometry")
-geometry.SetFile(FilePath=step_file)
-geom_comp = system.GetComponent(Name="Geometry")
-geom_comp.Refresh()
-geom_comp.Update()
-
-# -- Write mesh script to .py file ---------------------------------
+# ==================================================================
+# 3. MESH WITH NAMED SELECTIONS
+# ==================================================================
 mesh_path = os.path.join(project_dir, "lab4_mesh.py")
 mesh_header = "import os\nimport math\n\n"
 mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
@@ -70,20 +71,19 @@ mesh_header += "EMITTER_DEPTH = %s\n" % EMITTER_DEPTH
 mesh_header += "EMITTER_AREA = %s\n" % EMITTER_AREA
 
 mesh_body = r"""
-def get_faces(body):
-    faces = list(body.GetGeoBody().Faces)
-    print("Faces for '%s': %d" % (body.Name, len(faces)))
-    return faces
+all_bodies = list(Model.Geometry.GetChildren(DataModelObjectCategory.Body, True))
+print("Bodies: %d" % len(all_bodies))
+for b in all_bodies:
+    print("  '%s': Volume=%s" % (b.Name, b.Volume))
 
-geo = Model.Geometry
 all_faces = []
-for body in geo.GetChildren(DataModelObjectCategory.Body, True):
-    for face in get_faces(body):
+for body in all_bodies:
+    for face in list(body.GetGeoBody().Faces):
         all_faces.append(face)
 
 print("Total faces: %d" % len(all_faces))
 for f in all_faces:
-    print("  Face: centroid=(%s, %s, %s) area=%s" % (
+    print("  Face: centroid=(%.1f, %.1f, %.1f) area=%.1f" % (
         f.Centroid[0], f.Centroid[1], f.Centroid[2], f.Area))
 
 emitter_faces = []
@@ -117,17 +117,23 @@ mesh.PhysicsPreference = MeshPhysicsPreferenceType.CFD
 mesh.SolverPreference = MeshSolverPreferenceType.CFX
 mesh.ElementSize = Quantity("5 [mm]")
 mesh.GenerateMesh()
+print("Mesh generated")
 
-image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
-image_settings.Background = GraphicsBackgroundType.White
-image_settings.Width = 1920
-image_settings.Height = 1080
+try:
+    image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
+    image_settings.CurrentGraphicsDisplay = False
+    image_settings.Background = GraphicsBackgroundType.White
+    image_settings.Width = 1920
+    image_settings.Height = 1080
+    mesh.Activate()
+    Graphics.Camera.SetFit()
+    Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+    Graphics.ViewOptions.ShowLegend = False
+    Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
+    print("Mesh image exported")
+except Exception as e:
+    print("Mesh image failed (non-critical): %s" % e)
 
-mesh.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = False
-Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
 print("Mesh script done")
 """
 
@@ -135,12 +141,8 @@ with open(mesh_path, "w") as f:
     f.write(mesh_header)
     f.write(mesh_body)
 
-# -- Meshing via Mechanical -----------------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
-
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
+mesh_container = sys_mesh.GetContainer(ComponentName="Mesh")
+mesh_container.Edit()
 
 error_path = os.path.join(project_dir, "lab4_mesh_error.txt")
 wrapper_path = os.path.join(project_dir, "lab4_mesh_wrapper.py")
@@ -152,7 +154,7 @@ with open(wrapper_path, "w") as f:
     f.write("    with open(r'%s', 'w') as ef:\n" % error_path.replace("\\", "/"))
     f.write("        traceback.print_exc(file=ef)\n")
 
-model.SendCommand(Language="Python",
+mesh_container.SendCommand(Language="Python",
     Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
 
 if os.path.exists(error_path):
@@ -160,12 +162,21 @@ if os.path.exists(error_path):
     with open(error_path) as ef:
         print(ef.read())
 
-# -- CFX-Pre Setup ------------------------------------------------
-setup = system.GetContainer(ComponentName="Setup")
-setup.Edit()
+mesh_container.Exit()
+print("Mechanical exited")
 
-ccl_content = """
-LIBRARY:
+Save(Overwrite=True)
+
+# ==================================================================
+# 4. CFX-PRE SETUP
+# ==================================================================
+setup_container = sys_cfx.GetContainer(ComponentName="Setup")
+setup_container.Edit()
+setup_container.SendCommand(Command="> update")
+print("CFX-Pre opened and mesh loaded")
+
+# Custom material + expressions
+setup_container.SendCommand(Command="""LIBRARY:
   MATERIAL: CompressibleWater
     Material Group = User
     Option = Pure Substance
@@ -203,30 +214,13 @@ LIBRARY:
   END
 END
 
-FLOW: Flow Analysis 1
-  SOLUTION UNITS:
-    Angle Units = [rad]
-    Length Units = [mm]
-    Mass Units = [kg]
-    Solid Angle Units = [sr]
-    Temperature Units = [K]
-    Time Units = [s]
-  END
-  ANALYSIS TYPE:
-    Option = Transient
-    TIME DURATION:
-      Total Time = 0.01 [s]
-    END
-    TIME STEPS:
-      Timesteps = 2.17e-6 [s]
-    END
-    INITIAL TIME:
-      Option = Automatic with Value
-      Time = 0 [s]
-    END
-  END
+PARAMETERIZATION:
+END""")
+print("Material and expressions sent")
 
-  DOMAIN: Default Domain
+# Transient domain
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
     DOMAIN MODELS:
@@ -286,8 +280,34 @@ FLOW: Flow Analysis 1
       END
     END
   END
+END
 
-  SOLVER CONTROL:
+PARAMETERIZATION:
+END""")
+print("Domain and BCs sent")
+
+# Analysis type + solver control
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace ANALYSIS TYPE:
+    Option = Transient
+    TIME DURATION:
+      Total Time = 0.01 [s]
+    END
+    TIME STEPS:
+      Timesteps = 2.17e-6 [s]
+    END
+    INITIAL TIME:
+      Option = Automatic with Value
+      Time = 0 [s]
+    END
+  END
+END
+
+PARAMETERIZATION:
+END""")
+
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace SOLVER CONTROL:
     ADVECTION SCHEME:
       Option = High Resolution
     END
@@ -306,8 +326,13 @@ FLOW: Flow Analysis 1
       END
     END
   END
+END
 
-  OUTPUT CONTROL:
+PARAMETERIZATION:
+END""")
+
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace OUTPUT CONTROL:
     TRANSIENT RESULTS: Transient Results 1
       File Compression Level = Default
       Option = Selected Variables
@@ -318,80 +343,22 @@ FLOW: Flow Analysis 1
       END
     END
   END
-
-END
-"""
-
-ccl_path = os.path.join(project_dir, "lab4_setup.ccl")
-with open(ccl_path, "w") as f:
-    f.write(ccl_content)
-
-# Send CCL directly (importCCL file command is broken in WB 2024 R1)
-setup.SendCommand(Command=ccl_content)
-
-# -- Solve ---------------------------------------------------------
-# Skip system.Update() which re-meshes and fails on exit code 255.
-# Update Setup and Solution components directly.
-setup_comp = system.GetComponent(Name="Setup")
-try:
-    setup_comp.Update()
-except Exception as e:
-    print("Setup update failed: %s" % str(e))
-solution_comp = system.GetComponent(Name="Solution")
-try:
-    solution_comp.Update()
-except Exception as e:
-    print("Solution update failed: %s" % str(e))
-
-# -- CFX-Post ------------------------------------------------------
-results = system.GetContainer(ComponentName="Results")
-results.Edit()
-
-rd = results_dir.replace('\\', '/')
-
-post_ccl = """
-PLANE: MidPlane
-  Option = XZ Plane
-  Y = 0 [mm]
 END
 
-CONTOUR: PressureContour
-  Colour Variable = Pressure
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: VelocityContour
-  Colour Variable = Velocity
-  Location = MidPlane
-  Range = Local
-END
-"""
-post_path = os.path.join(project_dir, "lab4_post.ccl")
-with open(post_path, "w") as f:
-    f.write(post_ccl)
-results.SendCommand(Command=post_ccl)
-
-# Configure image export settings
-results.SendCommand(Command="""HARDCOPY:
-  Hardcopy Format = png
-  White Background = On
-  Use Screen Size = Off
-  Image Width = 1920
-  Image Height = 1080
+PARAMETERIZATION:
 END""")
+print("Analysis type, solver control, output sent")
 
-for name, fname in [("PressureContour", "pressure"), ("VelocityContour", "velocity")]:
-    results.SendCommand(Command='> show %s' % name)
-    results.SendCommand(Command='>print %s/%s.png' % (rd, fname))
+setup_container.SendCommand(Command="> save")
+setup_container.Exit()
+print("CFX-Pre saved and exited")
 
-results.SendCommand(Command='>print %s/geometry.png' % rd)
-
-results.SendCommand(Command='> timeStep first')
-for i in range(50):
-    results.SendCommand(Command='> show PressureContour')
-    results.SendCommand(Command='>print %s/frame_%04d.png' % (rd, i))
-    results.SendCommand(Command='> timeStep next, increment=10')
-
-print("Lab 4 complete. Results in: " + results_dir)
 Save(Overwrite=True)
+
+print("")
+print("=" * 60)
+print("SETUP COMPLETE")
+print("=" * 60)
+print("Project saved: %s" % proj_path)
+print("Next steps (manual): open .wbpj, right-click Solution -> Update")
+print("=" * 60)

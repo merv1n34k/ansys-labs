@@ -1,10 +1,10 @@
 """Lab 2 — CFX Steady-State geometry, Variant 13.
 
-Pipe with internal cone obstacle (fluid domain).
-  - Pipe: D=100 mm, L=300 mm (internal cylinder)
-  - Cone: base D=50 mm tapering to D=10 mm, H=50 mm, centered in pipe
-    Wide base faces the inlet (against the flow direction)
-  - Boolean subtract: pipe minus cone -> fluid domain with cone-shaped void
+Pipe with internal hopper (hollow cone / frustum shell) obstacle.
+  - Pipe: D=100 mm, L=300 mm along X axis
+  - Hopper: outer D_large=50 mm -> D_small=25 mm, wall thickness=5 mm, H=50 mm
+    Large diameter faces the inlet (against the flow)
+  - Boolean subtract: pipe minus hopper shell -> fluid domain
 """
 
 from pathlib import Path
@@ -16,35 +16,47 @@ PIPE_D = 100.0
 PIPE_R = PIPE_D / 2
 PIPE_L = 300.0
 
-# Cone dimensions (mm) — fits within 50x50x50 bounding box
-CONE_BASE_D = 50.0
-CONE_TIP_D = 10.0
-CONE_H = 50.0
-CONE_BASE_R = CONE_BASE_D / 2
-CONE_TIP_R = CONE_TIP_D / 2
+# Hopper dimensions (mm)
+HOPPER_D_LARGE = 50.0
+HOPPER_D_SMALL = 25.0
+HOPPER_THICKNESS = 5.0
+HOPPER_H = 50.0
 
-# Pipe runs along X axis (horizontal): X=0 (inlet) to X=PIPE_L (outlet)
-# Cone centered at X = PIPE_L / 2, wide base facing inlet (negative X direction)
+HOPPER_R_LARGE = HOPPER_D_LARGE / 2   # 25 mm
+HOPPER_R_SMALL = HOPPER_D_SMALL / 2   # 12.5 mm
+HOPPER_R_LARGE_INNER = HOPPER_R_LARGE - HOPPER_THICKNESS  # 20 mm
+HOPPER_R_SMALL_INNER = HOPPER_R_SMALL - HOPPER_THICKNESS  # 7.5 mm
 
-# Build pipe (fluid domain cylinder along X)
+# Pipe along X: X=0 (inlet) to X=300 (outlet)
+# Hopper centered at X=150: large end at X=125, small end at X=175
+hopper_base_x = PIPE_L / 2 - HOPPER_H / 2  # 125 mm
+
+# Build pipe
 pipe = cq.Workplane("YZ").circle(PIPE_R).extrude(PIPE_L)
 
-# Build cone as a lofted frustum between two circles
-cone_center_x = PIPE_L / 2
-cone_base_x = cone_center_x - CONE_H / 2  # wide end, faces inlet
-cone_tip_x = cone_center_x + CONE_H / 2  # narrow end, faces outlet
-
-cone = (
+# Build hopper shell = outer frustum - inner frustum
+outer_cone = (
     cq.Workplane("YZ")
-    .workplane(offset=cone_base_x)
-    .circle(CONE_BASE_R)
-    .workplane(offset=CONE_H)
-    .circle(CONE_TIP_R)
+    .workplane(offset=hopper_base_x)
+    .circle(HOPPER_R_LARGE)
+    .workplane(offset=HOPPER_H)
+    .circle(HOPPER_R_SMALL)
     .loft()
 )
 
-# Boolean subtract: fluid domain = pipe - cone
-fluid_domain = pipe.cut(cone)
+inner_cone = (
+    cq.Workplane("YZ")
+    .workplane(offset=hopper_base_x)
+    .circle(HOPPER_R_LARGE_INNER)
+    .workplane(offset=HOPPER_H)
+    .circle(HOPPER_R_SMALL_INNER)
+    .loft()
+)
+
+hopper_shell = outer_cone.cut(inner_cone)
+
+# Fluid domain = pipe - hopper shell
+fluid_domain = pipe.cut(hopper_shell)
 
 # Export
 step_dir = Path(__file__).parent / "step"

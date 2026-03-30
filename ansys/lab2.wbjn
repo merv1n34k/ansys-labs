@@ -1,30 +1,26 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 2: CFX Steady-State (Variant 13)
 # Run: runwb2 -R ansys/lab2.wbjn
 #
-# Architecture: 3 systems (Geometry + Mesh + CFX) connected by TransferData.
-# Based on recorded working journal from manual GUI simulation.
-#
-# Geometry: pipe D=100mm along X axis (X=0..300), cone obstacle at X=125..175.
-# Single fluid domain body after boolean subtract (pipe - cone).
+# Creates project with 3 systems (Geometry + Mesh + CFX), imports STEP,
+# generates mesh with Named Selections, configures CFX-Pre with CCL.
+# Geometry: pipe D=100mm, hopper (hollow cone) D_large=50mm -> D_small=25mm,
+# wall 5mm, large end faces inlet. After script: open .wbpj and click Solve.
 
 import os
-import time
 
 # -- Paths ----------------------------------------------------------
 root_dir = os.environ.get("ANSYS_LABS_ROOT", os.path.abspath(os.getcwd()))
 step_file = os.path.join(root_dir, "geometry", "step", "lab2.step")
 project_dir = os.path.join(root_dir, "ansys", "projects", "lab2")
 results_dir = os.path.join(root_dir, "results", "lab2")
-NPROC = int(os.environ.get("CFX_NPROC", "4"))
 
 for d in [project_dir, results_dir]:
     if not os.path.exists(d):
         os.makedirs(d)
 
 print("=" * 60)
-print("LAB 2 PIPELINE START")
+print("LAB 2 SETUP")
 print("STEP: " + step_file + " (exists=%s)" % os.path.exists(step_file))
-print("NPROC: %d" % NPROC)
 print("=" * 60)
 
 # ==================================================================
@@ -41,7 +37,6 @@ sys_mesh = mesh_tmpl.CreateSystem(Position="Right", RelativeTo=sys_geo)
 cfx_tmpl = GetTemplate(TemplateName="CFX")
 sys_cfx = cfx_tmpl.CreateSystem(Position="Right", RelativeTo=sys_mesh)
 
-# Connect: Geometry -> Mesh -> CFX Setup
 geo_comp = sys_geo.GetComponent(Name="Geometry")
 mesh_comp = sys_mesh.GetComponent(Name="Mesh")
 geo_comp.TransferData(TargetComponent=mesh_comp)
@@ -57,7 +52,7 @@ print("3 systems created and connected")
 geo_container = sys_geo.GetContainer(ComponentName="Geometry")
 geo_container.SetFile(FilePath=step_file)
 mesh_comp.Refresh()
-print("Geometry imported, mesh component refreshed")
+print("Geometry imported")
 
 proj_path = os.path.join(project_dir, "lab2.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
@@ -151,26 +146,16 @@ if os.path.exists(error_path):
     with open(error_path) as ef:
         print(ef.read())
 
-# EXIT Mechanical before proceeding (critical for solver to work)
 mesh_container.Exit()
 print("Mechanical exited")
-
-# Update Mesh component so WB registers the mesh output
-try:
-    mesh_comp.Update(AllDependencies=True)
-    print("Mesh component updated OK")
-except Exception as e:
-    print("Mesh component Update failed: %s" % e)
 
 Save(Overwrite=True)
 
 # ==================================================================
-# 4. CFX-PRE SETUP
+# 4. CFX-PRE SETUP (configure domain, BCs, solver control)
 # ==================================================================
 setup_container = sys_cfx.GetContainer(ComponentName="Setup")
 setup_container.Edit()
-
-# Tell CFX-Pre to load the mesh
 setup_container.SendCommand(Command="> update")
 print("CFX-Pre opened and mesh loaded")
 
@@ -283,19 +268,6 @@ END
 PARAMETERIZATION:
 END""")
 
-# Output control
-setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
-&replace OUTPUT CONTROL:
-    RESULTS:
-      File Compression Level = Default
-      Option = Standard
-    END
-  END
-END
-
-PARAMETERIZATION:
-END""")
-
 # Initialization
 setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
 &replace INITIALISATION:
@@ -317,279 +289,27 @@ END
 
 PARAMETERIZATION:
 END""")
-print("Solver control, output, initialization sent")
+print("Solver control and initialization sent")
 
-# Explicitly save CFX-Pre case before exiting
 setup_container.SendCommand(Command="> save")
-print("CFX-Pre case saved")
-
-# EXIT CFX-Pre before solving (critical!)
 setup_container.Exit()
-print("CFX-Pre exited")
-
-# Update Setup component to generate .def file
-try:
-    setup_comp.Update(AllDependencies=True)
-    print("Setup component updated OK")
-except Exception as e:
-    print("Setup component Update failed: %s" % e)
-
-# Check for .def file in project directory
-def_found = False
-for dirpath, dirnames, filenames in os.walk(project_dir):
-    for fn in filenames:
-        if fn.endswith('.def'):
-            def_found = True
-            print("Found .def: %s (%d bytes)" % (
-                os.path.join(dirpath, fn),
-                os.path.getsize(os.path.join(dirpath, fn))))
-# Also check home .ansys dir
-ansys_dir = os.path.expanduser("~/.ansys")
-if os.path.exists(ansys_dir):
-    for wb_dir in os.listdir(ansys_dir):
-        wb_path = os.path.join(ansys_dir, wb_dir)
-        if os.path.isdir(wb_path):
-            for dirpath, dirnames, filenames in os.walk(wb_path):
-                for fn in filenames:
-                    if fn.endswith('.def'):
-                        def_found = True
-                        fpath = os.path.join(dirpath, fn)
-                        print("Found .def in .ansys: %s (%d bytes)" % (
-                            fpath, os.path.getsize(fpath)))
-if not def_found:
-    print("WARNING: no .def file found anywhere")
+print("CFX-Pre saved and exited")
 
 Save(Overwrite=True)
 
 # ==================================================================
-# 5. SOLVE
+# DONE - Open project in GUI to solve
 # ==================================================================
-print("\n" + "=" * 60)
-print("SOLVER")
+print("")
 print("=" * 60)
-
-solution_container = sys_cfx.GetContainer(ComponentName="Solution")
-try:
-    solution_container.Exit()
-except:
-    pass
-
-# Configure solver properties (matches recorded journal)
-cfx_props = solution_container.GetCFXSolutionProperties()
-cfx_props.CacheSolutionData = True
-cfx_props.InitializationOption = "Automatic"
-cfx_props.LoadMResOptions = "AllConfigsSingleCase"
-
-solution_container.SetExecutionControl(CCL="""&replace SIMULATION CONTROL:
-  EXECUTION CONTROL:
-    EXECUTABLE SELECTION:
-      Double Precision = On
-      Large Problem = Off
-    END
-    INTERPOLATOR STEP CONTROL:
-      Runtime Priority = Standard
-      MEMORY CONTROL:
-        Memory Allocation Factor = 1.0
-        Option = Model Based
-      END
-    END
-    PARTITIONER STEP CONTROL:
-      Multidomain Option = Automatic
-      Runtime Priority = Standard
-      MEMORY CONTROL:
-        Memory Allocation Factor = 1.0
-        Option = Model Based
-      END
-      PARTITION SMOOTHING:
-        Maximum Partition Smoothing Sweeps = 100
-        Option = Smooth
-      END
-      PARTITIONING TYPE:
-        MeTiS Type = k-way
-        Option = MeTiS
-        Partition Size Rule = Automatic
-      END
-    END
-    RUN DEFINITION:
-      Run Mode = Full
-    END
-    SOLVER STEP CONTROL:
-      Runtime Priority = Standard
-      MEMORY CONTROL:
-        Memory Allocation Factor = 1.0
-        Option = Model Based
-      END
-      PARALLEL ENVIRONMENT:
-        Number of Processes = %d
-        Start Method = Intel MPI Local Parallel
-      END
-    END
-  END
-END
-""" % NPROC)
-
-print("Solver configured, starting with %d processes..." % NPROC)
-t0 = time.time()
-
-solution_comp_ref = sys_cfx.GetComponent(Name="Solution")
-try:
-    solution_comp_ref.Update(Force=True)
-    print("Solver completed in %.1fs" % (time.time() - t0))
-except Exception as e:
-    print("Solver failed in %.1fs: %s" % (time.time() - t0, e))
-
-# Check for solver output files
-def find_cfx_files():
-    found = []
-    for dirpath, dirnames, filenames in os.walk(project_dir):
-        for fn in filenames:
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in ('.def', '.res', '.out', '.mres'):
-                fpath = os.path.join(dirpath, fn)
-                found.append((fpath, os.path.getsize(fpath)))
-    return found
-
-cfx_files = find_cfx_files()
-if cfx_files:
-    print("Solver files:")
-    for fp, sz in cfx_files:
-        print("  %s (%d bytes)" % (fp, sz))
-else:
-    print("WARNING: no solver files found")
-
-has_res = any(fp.endswith('.res') for fp, _ in cfx_files)
-if has_res:
-    print("SOLVER SUCCEEDED")
-else:
-    print("SOLVER DID NOT PRODUCE RESULTS")
-
-Save(Overwrite=True)
-
-# ==================================================================
-# 6. CFX-POST
-# ==================================================================
-print("\n" + "=" * 60)
-print("CFX-POST")
+print("SETUP COMPLETE")
 print("=" * 60)
-
-results_container = sys_cfx.GetContainer(ComponentName="Results")
-results_container.Edit()
-
-rd = results_dir.replace('\\', '/')
-
-# Create visualization objects
-results_container.SendCommand(Command="""PLANE: MidPlane
-  Option = XZ Plane
-  Y = 0 [m]
-END
-
-CONTOUR: VelocityContour
-  Colour Variable = Velocity
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: PressureContour
-  Colour Variable = Pressure
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: TKEContour
-  Colour Variable = Turbulence Kinetic Energy
-  Location = MidPlane
-  Range = Local
-END
-
-VECTOR: VelocityVectors
-  Location List = MidPlane
-  Variable = Velocity
-  Colour Mode = Use Plot Variable
-  Colour Variable = Velocity
-END
-
-STREAMLINE: Streamlines
-  Boundary List = Inlet
-  Colour Variable = Velocity
-  Max Points = 500
-  Option = From Boundary
-END
-""")
-print("Post-processing objects created")
-
-# Image export settings
-results_container.SendCommand(Command="""HARDCOPY:
-  Hardcopy Format = png
-  White Background = On
-  Use Screen Size = Off
-  Image Width = 1920
-  Image Height = 1080
-END""")
-
-# Export individual images
-for vis_type, vis_path, fname in [
-    ("CONTOUR", "VelocityContour", "velocity"),
-    ("CONTOUR", "PressureContour", "pressure"),
-    ("CONTOUR", "TKEContour", "tke"),
-    ("STREAMLINE", "Streamlines", "streamlines"),
-    ("VECTOR", "VelocityVectors", "vectors"),
-]:
-    results_container.SendCommand(Command=">hide /CONTOUR:VelocityContour")
-    results_container.SendCommand(Command=">hide /CONTOUR:PressureContour")
-    results_container.SendCommand(Command=">hide /CONTOUR:TKEContour")
-    results_container.SendCommand(Command=">hide /STREAMLINE:Streamlines")
-    results_container.SendCommand(Command=">hide /VECTOR:VelocityVectors")
-    results_container.SendCommand(Command=">show /%s:%s" % (vis_type, vis_path))
-    results_container.SendCommand(Command=">print %s/%s.png" % (rd, fname))
-    print("Exported: %s.png" % fname)
-
-# Combined: velocity contour + streamlines
-results_container.SendCommand(Command=">hide /CONTOUR:PressureContour")
-results_container.SendCommand(Command=">hide /CONTOUR:TKEContour")
-results_container.SendCommand(Command=">hide /VECTOR:VelocityVectors")
-results_container.SendCommand(Command=">show /CONTOUR:VelocityContour")
-results_container.SendCommand(Command=">show /STREAMLINE:Streamlines")
-results_container.SendCommand(Command=">print %s/velocity_streamlines.png" % rd)
-print("Exported: velocity_streamlines.png")
-
-# Geometry overview
-results_container.SendCommand(Command=">hide /CONTOUR:VelocityContour")
-results_container.SendCommand(Command=">hide /STREAMLINE:Streamlines")
-results_container.SendCommand(Command=">print %s/geometry.png" % rd)
-
-# CSV with quantitative results
-power_lines = [
-    "!open(my $fh, '>', '%s/calc.csv') or die;" % rd,
-    '!print $fh "Function,Variable,Location,Unit,Value\\n";',
-    '!my $v;',
-]
-for func, var, loc, unit in [
-    ("maxVal", "Velocity", "Default Domain", "m s^-1"),
-    ("areaAve", "Velocity", "Inlet", "m s^-1"),
-    ("areaAve", "Velocity", "Outlet", "m s^-1"),
-    ("maxVal", "Pressure", "Default Domain", "Pa"),
-    ("minVal", "Pressure", "Default Domain", "Pa"),
-    ("areaAve", "Pressure", "Inlet", "Pa"),
-    ("maxVal", "Turbulence Kinetic Energy", "Default Domain", "m^2 s^-2"),
-]:
-    power_lines.append(
-        "!$v = evaluate('%s(%s)@%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
-        % (func, var, loc, func, var, loc, unit))
-power_lines.append('!close($fh);')
-results_container.SendCommand(Command='\n'.join(power_lines))
-print("CSV export done")
-
-results_container.Exit()
-
-# List result files
-print("\n--- RESULTS ---")
-if os.path.exists(results_dir):
-    for fn in sorted(os.listdir(results_dir)):
-        fpath = os.path.join(results_dir, fn)
-        sz = os.path.getsize(fpath) if os.path.isfile(fpath) else -1
-        print("  %s (%d bytes)" % (fn, sz))
-
-print("\n" + "=" * 60)
-print("LAB 2 COMPLETE")
+print("Project saved: %s" % proj_path)
+print("")
+print("Next steps (manual in GUI):")
+print("  1. Open %s in Workbench" % proj_path)
+print("  2. Right-click Solution -> Update (or F5)")
+print("  3. Wait for solver to finish")
+print("  4. Double-click Results to open CFX-Post")
+print("  5. Export images/CSV as needed")
 print("=" * 60)
-Save(Overwrite=True)

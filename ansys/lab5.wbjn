@@ -1,8 +1,9 @@
 # ANSYS Workbench 2024 R1 Journal -- Lab 5: CFX Transient Immersed Solid (Variant 13)
 # Run: runwb2 -R ansys/lab5.wbjn
 #
-# Geometry: single assembly STEP with 2 bodies (vessel_fluid + mixer).
-# Mixer rotates around Z axis at 400 rpm. Immersed Solid approach.
+# 3-system architecture (Geometry + Mesh + CFX). 2-body assembly:
+# vessel_fluid + mixer. Mixer rotates at 400 rpm via Immersed Solid.
+# After script: open .wbpj and click Solve.
 
 import os
 
@@ -17,69 +18,70 @@ for d in [project_dir, results_dir]:
         os.makedirs(d)
 
 SHELL_H = 1000.0
-R_IN = 247.9
 
-# -- Create CFX system ---------------------------------------------
-template = None
-errors = []
-for name, solver in [("Fluid Flow (CFX)", "CFX"),
-                     ("Fluid Flow (CFX)", None),
-                     ("CFX", "CFX"),
-                     ("CFX", None),
-                     ("Fluid Flow", "CFX")]:
-    try:
-        if solver:
-            template = GetTemplate(TemplateName=name, Solver=solver)
-        else:
-            template = GetTemplate(TemplateName=name)
-        print("Found template: '%s' (solver=%s)" % (name, solver))
-        break
-    except Exception as e:
-        errors.append("  '%s' solver='%s': %s" % (name, solver, str(e)))
+print("=" * 60)
+print("LAB 5 SETUP")
+print("STEP: " + step_file + " (exists=%s)" % os.path.exists(step_file))
+print("=" * 60)
 
-if template is None:
-    print("All CFX template attempts failed:")
-    for err in errors:
-        print(err)
-    raise Exception("Could not find CFX template")
+# ==================================================================
+# 1. CREATE 3 SYSTEMS: Geometry -> Mesh -> CFX
+# ==================================================================
+SetScriptVersion(Version="24.1.144")
 
-system = template.CreateSystem()
+geo_tmpl = GetTemplate(TemplateName="Geometry")
+sys_geo = geo_tmpl.CreateSystem()
+
+mesh_tmpl = GetTemplate(TemplateName="Mesh")
+sys_mesh = mesh_tmpl.CreateSystem(Position="Right", RelativeTo=sys_geo)
+
+cfx_tmpl = GetTemplate(TemplateName="CFX")
+sys_cfx = cfx_tmpl.CreateSystem(Position="Right", RelativeTo=sys_mesh)
+
+geo_comp = sys_geo.GetComponent(Name="Geometry")
+mesh_comp = sys_mesh.GetComponent(Name="Mesh")
+geo_comp.TransferData(TargetComponent=mesh_comp)
+
+setup_comp = sys_cfx.GetComponent(Name="Setup")
+mesh_comp.TransferData(TargetComponent=setup_comp)
+
+print("3 systems created and connected")
+
+# ==================================================================
+# 2. GEOMETRY IMPORT
+# ==================================================================
+geo_container = sys_geo.GetContainer(ComponentName="Geometry")
+geo_container.SetFile(FilePath=step_file)
+mesh_comp.Refresh()
+print("Geometry imported")
 
 proj_path = os.path.join(project_dir, "lab5.wbpj")
 Save(FilePath=proj_path, Overwrite=True)
 
-# -- Geometry Import -----------------------------------------------
-geometry = system.GetContainer(ComponentName="Geometry")
-geometry.SetFile(FilePath=step_file)
-geom_comp = system.GetComponent(Name="Geometry")
-geom_comp.Refresh()
-geom_comp.Update()
-
-# -- Write mesh script to .py file ---------------------------------
+# ==================================================================
+# 3. MESH WITH NAMED SELECTIONS
+# ==================================================================
 mesh_path = os.path.join(project_dir, "lab5_mesh.py")
 mesh_header = "import os\n\n"
 mesh_header += "results_dir = r'%s'\n" % results_dir.replace("\\", "/")
 mesh_header += "SHELL_H = %s\n" % SHELL_H
 
 mesh_body = r"""
-all_bodies = list(Model.Geometry.GetChildren(
-    DataModelObjectCategory.Body, True
-))
+all_bodies = list(Model.Geometry.GetChildren(DataModelObjectCategory.Body, True))
 all_bodies.sort(key=lambda b: b.Volume, reverse=True)
 print("Bodies: %d" % len(all_bodies))
 for b in all_bodies:
     print("  '%s': Volume=%s" % (b.Name, b.Volume))
+
+vessel_body = all_bodies[0]
+mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
 
 def get_faces(body):
     faces = list(body.GetGeoBody().Faces)
     print("Faces for '%s': %d" % (body.Name, len(faces)))
     return faces
 
-vessel_body = all_bodies[0]
-mixer_body = all_bodies[1] if len(all_bodies) > 1 else None
-
 vessel_faces = get_faces(vessel_body)
-print("Vessel faces: %d" % len(vessel_faces))
 
 top_faces = []
 wall_faces = []
@@ -101,6 +103,7 @@ for name, faces in [("Wall", wall_faces), ("Top", top_faces), ("Bottom", bottom_
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Ids = [f.Id for f in faces]
     ns.Location = sel
+    print("NS '%s': %d faces" % (name, len(faces)))
 
 if mixer_body:
     mixer_faces = get_faces(mixer_body)
@@ -109,33 +112,37 @@ if mixer_body:
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Ids = [f.Id for f in mixer_faces]
     ns.Location = sel
-    print("Mixer: %d faces" % len(mixer_faces))
+    print("NS 'Mixer': %d faces" % len(mixer_faces))
 
-# Body-level named selections for CFX domain/immersed solid
-if mixer_body:
     ns = Model.AddNamedSelection()
     ns.Name = "MixerBody"
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
     sel.Ids = [mixer_body.GetGeoBody().Id]
     ns.Location = sel
-    print("MixerBody NS created")
+    print("NS 'MixerBody' created")
 
 mesh = Model.Mesh
 mesh.PhysicsPreference = MeshPhysicsPreferenceType.CFD
 mesh.SolverPreference = MeshSolverPreferenceType.CFX
 mesh.ElementSize = Quantity("8 [mm]")
 mesh.GenerateMesh()
+print("Mesh generated")
 
-image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
-image_settings.Background = GraphicsBackgroundType.White
-image_settings.Width = 1920
-image_settings.Height = 1080
+try:
+    image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
+    image_settings.CurrentGraphicsDisplay = False
+    image_settings.Background = GraphicsBackgroundType.White
+    image_settings.Width = 1920
+    image_settings.Height = 1080
+    mesh.Activate()
+    Graphics.Camera.SetFit()
+    Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+    Graphics.ViewOptions.ShowLegend = False
+    Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
+    print("Mesh image exported")
+except Exception as e:
+    print("Mesh image failed (non-critical): %s" % e)
 
-mesh.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = False
-Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
 print("Mesh script done")
 """
 
@@ -143,12 +150,8 @@ with open(mesh_path, "w") as f:
     f.write(mesh_header)
     f.write(mesh_body)
 
-# -- Meshing via Mechanical -----------------------------------------
-mesh_component = system.GetComponent(Name="Mesh")
-mesh_component.Refresh()
-
-model = system.GetContainer(ComponentName="Mesh")
-model.Edit()
+mesh_container = sys_mesh.GetContainer(ComponentName="Mesh")
+mesh_container.Edit()
 
 error_path = os.path.join(project_dir, "lab5_mesh_error.txt")
 wrapper_path = os.path.join(project_dir, "lab5_mesh_wrapper.py")
@@ -160,7 +163,7 @@ with open(wrapper_path, "w") as f:
     f.write("    with open(r'%s', 'w') as ef:\n" % error_path.replace("\\", "/"))
     f.write("        traceback.print_exc(file=ef)\n")
 
-model.SendCommand(Language="Python",
+mesh_container.SendCommand(Language="Python",
     Command="execfile(r'%s')" % wrapper_path.replace("\\", "/"))
 
 if os.path.exists(error_path):
@@ -168,35 +171,22 @@ if os.path.exists(error_path):
     with open(error_path) as ef:
         print(ef.read())
 
-# -- CFX-Pre Setup ------------------------------------------------
-setup = system.GetContainer(ComponentName="Setup")
-setup.Edit()
+mesh_container.Exit()
+print("Mechanical exited")
 
-ccl_content = """
-FLOW: Flow Analysis 1
-  SOLUTION UNITS:
-    Angle Units = [rad]
-    Length Units = [mm]
-    Mass Units = [kg]
-    Solid Angle Units = [sr]
-    Temperature Units = [K]
-    Time Units = [s]
-  END
-  ANALYSIS TYPE:
-    Option = Transient
-    TIME DURATION:
-      Total Time = 4.0 [s]
-    END
-    TIME STEPS:
-      Timesteps = 4.17e-3 [s]
-    END
-    INITIAL TIME:
-      Option = Automatic with Value
-      Time = 0 [s]
-    END
-  END
+Save(Overwrite=True)
 
-  DOMAIN: Default Domain
+# ==================================================================
+# 4. CFX-PRE SETUP
+# ==================================================================
+setup_container = sys_cfx.GetContainer(ComponentName="Setup")
+setup_container.Edit()
+setup_container.SendCommand(Command="> update")
+print("CFX-Pre opened and mesh loaded")
+
+# Domain + BCs + Immersed Solid
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace DOMAIN: Default Domain
     Coord Frame = Coord 0
     Domain Type = Fluid
     DOMAIN MODELS:
@@ -225,7 +215,7 @@ FLOW: Flow Analysis 1
         Option = None
       END
       TURBULENCE MODEL:
-        Option = k-Epsilon
+        Option = k epsilon
       END
       TURBULENT WALL FUNCTIONS:
         Option = Scalable
@@ -262,7 +252,14 @@ FLOW: Flow Analysis 1
       END
     END
   END
+END
 
+PARAMETERIZATION:
+END""")
+print("Domain and BCs sent")
+
+# Immersed Solid
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
   IMMERSED SOLID: MixerSolid
     Domain List = Default Domain
     Location = MixerBody
@@ -275,8 +272,35 @@ FLOW: Flow Analysis 1
       END
     END
   END
+END
 
-  SOLVER CONTROL:
+PARAMETERIZATION:
+END""")
+print("Immersed Solid sent")
+
+# Analysis type
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace ANALYSIS TYPE:
+    Option = Transient
+    TIME DURATION:
+      Total Time = 4.0 [s]
+    END
+    TIME STEPS:
+      Timesteps = 4.17e-3 [s]
+    END
+    INITIAL TIME:
+      Option = Automatic with Value
+      Time = 0 [s]
+    END
+  END
+END
+
+PARAMETERIZATION:
+END""")
+
+# Solver control with expert params
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace SOLVER CONTROL:
     Turbulence Numerics = High Resolution
     ADVECTION SCHEME:
       Option = High Resolution
@@ -299,8 +323,14 @@ FLOW: Flow Analysis 1
       check isolated regions = f
     END
   END
+END
 
-  OUTPUT CONTROL:
+PARAMETERIZATION:
+END""")
+
+# Output control
+setup_container.SendCommand(Command="""FLOW: Flow Analysis 1
+&replace OUTPUT CONTROL:
     TRANSIENT RESULTS: Transient Results 1
       File Compression Level = Default
       Option = Selected Variables
@@ -312,89 +342,21 @@ FLOW: Flow Analysis 1
     END
   END
 END
-"""
 
-ccl_path = os.path.join(project_dir, "lab5_setup.ccl")
-with open(ccl_path, "w") as f:
-    f.write(ccl_content)
-
-# Send CCL directly (importCCL file command is broken in WB 2024 R1)
-setup.SendCommand(Command=ccl_content)
-
-# -- Solve ---------------------------------------------------------
-setup_comp = system.GetComponent(Name="Setup")
-setup_comp.Update()
-solution_comp = system.GetComponent(Name="Solution")
-solution_comp.Update()
-
-# -- CFX-Post ------------------------------------------------------
-results = system.GetContainer(ComponentName="Results")
-results.Edit()
-
-rd = results_dir.replace('\\', '/')
-
-post_ccl = """
-PLANE: MidPlane
-  Option = XZ Plane
-  Y = 0 [mm]
-END
-
-CONTOUR: VelocityContour
-  Colour Variable = Velocity
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: PressureContour
-  Colour Variable = Pressure
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: SSRContour
-  Colour Variable = Shear Strain Rate
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: TKEContour
-  Colour Variable = Turbulence Kinetic Energy
-  Location = MidPlane
-  Range = Local
-END
-
-CONTOUR: TEFContour
-  Colour Variable = Turbulence Eddy Frequency
-  Location = MidPlane
-  Range = Local
-END
-"""
-post_path = os.path.join(project_dir, "lab5_post.ccl")
-with open(post_path, "w") as f:
-    f.write(post_ccl)
-results.SendCommand(Command=post_ccl)
-
-# Configure image export settings
-results.SendCommand(Command="""HARDCOPY:
-  Hardcopy Format = png
-  White Background = On
-  Use Screen Size = Off
-  Image Width = 1920
-  Image Height = 1080
+PARAMETERIZATION:
 END""")
+print("Analysis type, solver control, output sent")
 
-for name, fname in [("VelocityContour", "velocity"), ("PressureContour", "pressure"),
-                     ("SSRContour", "ssr"), ("TKEContour", "tke"), ("TEFContour", "tef")]:
-    results.SendCommand(Command='> show %s' % name)
-    results.SendCommand(Command='>print %s/%s.png' % (rd, fname))
+setup_container.SendCommand(Command="> save")
+setup_container.Exit()
+print("CFX-Pre saved and exited")
 
-results.SendCommand(Command='>print %s/geometry.png' % rd)
-
-results.SendCommand(Command='> timeStep first')
-for i in range(40):
-    results.SendCommand(Command='> show VelocityContour')
-    results.SendCommand(Command='>print %s/frame_%04d.png' % (rd, i))
-    results.SendCommand(Command='> timeStep next')
-
-print("Lab 5 complete. Results in: " + results_dir)
 Save(Overwrite=True)
+
+print("")
+print("=" * 60)
+print("SETUP COMPLETE")
+print("=" * 60)
+print("Project saved: %s" % proj_path)
+print("Next steps (manual): open .wbpj, right-click Solution -> Update")
+print("=" * 60)
