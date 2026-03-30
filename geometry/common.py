@@ -53,14 +53,17 @@ def make_vessel_shell() -> cq.Workplane:
     return vessel
 
 
-def make_vessel_inner_volume() -> cq.Workplane:
+def make_vessel_inner_volume(flat_bottom: bool = False) -> cq.Workplane:
     """Create the vessel inner fluid volume for CFD analysis (Labs 3, 5).
 
     Returns a solid representing the internal cavity.
+    flat_bottom=True gives a flat base at Z=0 (simpler for bottom inlet).
     """
-    # Inner cylinder
     inner_cyl = cq.Workplane("XY").circle(R_IN).extrude(SHELL_H)
-    # Inner hemisphere (bottom, Z <= 0)
+    if flat_bottom:
+        return inner_cyl
+
+    # Spherical bottom hemisphere (Z <= 0)
     inner_sphere = cq.Workplane("XY").sphere(R_IN)
     cut_box = cq.Workplane("XY").box(OD + 10, OD + 10, OD + 10, centered=True).translate((0, 0, (OD + 10) / 2))
     bottom_hemi = inner_sphere.cut(cut_box)

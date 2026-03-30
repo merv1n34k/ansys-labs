@@ -111,7 +111,7 @@ def build():
     coil_fluid = cq.Workplane("XY").newObject([inner_solid])
 
     # Vessel fluid with nozzles
-    vessel_fluid = make_vessel_inner_volume()
+    vessel_fluid = make_vessel_inner_volume(flat_bottom=True)
     vessel_noz_top = _make_vessel_nozzle(VESSEL_NZ_TOP, VESSEL_NZ_R)
     vessel_noz_bot = _make_vessel_nozzle(VESSEL_NZ_BOT, VESSEL_NZ_R)
     vessel_fluid = vessel_fluid.union(vessel_noz_top).union(vessel_noz_bot)
