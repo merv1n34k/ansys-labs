@@ -52,11 +52,11 @@ if template is None:
 system = template.CreateSystem()
 print("System created: %s" % system.DisplayText)
 
-# List all components in the system
+# List all components
 for comp_name in ["Geometry", "Mesh", "Setup", "Solution", "Results"]:
     try:
         comp = system.GetComponent(Name=comp_name)
-        print("  Component '%s': state=%s" % (comp_name, comp.GetState()))
+        print("  Component '%s': %s" % (comp_name, type(comp).__name__))
     except Exception as e:
         print("  Component '%s': %s" % (comp_name, e))
 
@@ -71,11 +71,10 @@ print("=" * 60)
 geometry = system.GetContainer(ComponentName="Geometry")
 geometry.SetFile(FilePath=step_file)
 geom_comp = system.GetComponent(Name="Geometry")
-print("Geometry state before refresh: %s" % geom_comp.GetState())
 geom_comp.Refresh()
-print("Geometry state after refresh: %s" % geom_comp.GetState())
+print("Geometry refreshed")
 geom_comp.Update()
-print("Geometry state after update: %s" % geom_comp.GetState())
+print("Geometry updated")
 
 # -- Write mesh script to .py file ---------------------------------
 mesh_path = os.path.join(project_dir, "lab2_mesh.py")
@@ -264,8 +263,8 @@ print("RUNNING MESH SCRIPT IN MECHANICAL")
 print("=" * 60)
 
 mesh_component = system.GetComponent(Name="Mesh")
-print("Mesh component state before: %s" % mesh_component.GetState())
 mesh_component.Refresh()
+print("Mesh component refreshed")
 
 model = system.GetContainer(ComponentName="Mesh")
 model.Edit()
@@ -302,13 +301,10 @@ if os.path.exists(mesh_done):
 else:
     print("WARNING: mesh_done.txt missing -- script may have crashed")
 
-# Check mesh component state after script
-print("Mesh component state after: %s" % mesh_component.GetState())
-
-# Explicitly update mesh component
+# Explicitly update mesh component to finalize
 try:
     mesh_component.Update()
-    print("Mesh component updated: %s" % mesh_component.GetState())
+    print("Mesh component updated OK")
 except Exception as e:
     print("Mesh component update: %s" % e)
 
@@ -462,22 +458,20 @@ print("SOLVER")
 print("=" * 60)
 
 setup_comp = system.GetComponent(Name="Setup")
-print("Setup component state: %s" % setup_comp.GetState())
 print("Updating Setup component...")
 t0 = time.time()
 try:
     setup_comp.Update()
-    print("Setup updated in %.1fs: state=%s" % (time.time() - t0, setup_comp.GetState()))
+    print("Setup updated in %.1fs" % (time.time() - t0))
 except Exception as e:
     print("Setup Update FAILED in %.1fs: %s" % (time.time() - t0, e))
 
 solution_comp = system.GetComponent(Name="Solution")
-print("Solution component state: %s" % solution_comp.GetState())
 print("Updating Solution component (this runs the CFX solver)...")
 t0 = time.time()
 try:
     solution_comp.Update()
-    print("Solution updated in %.1fs: state=%s" % (time.time() - t0, solution_comp.GetState()))
+    print("Solution updated in %.1fs" % (time.time() - t0))
 except Exception as e:
     print("Solution Update FAILED in %.1fs: %s" % (time.time() - t0, e))
 
@@ -492,14 +486,7 @@ for dirpath, dirnames, filenames in os.walk(project_dir):
             fpath = os.path.join(dirpath, fn)
             print("  %s (%d bytes)" % (fpath, os.path.getsize(fpath)))
 
-# Check all component states
-print("\n--- COMPONENT STATES AFTER SOLVE ---")
-for comp_name in ["Geometry", "Mesh", "Setup", "Solution", "Results"]:
-    try:
-        comp = system.GetComponent(Name=comp_name)
-        print("  %s: %s" % (comp_name, comp.GetState()))
-    except Exception as e:
-        print("  %s: %s" % (comp_name, e))
+print("Solver phase complete")
 
 # -- CFX-Post ------------------------------------------------------
 print("\n" + "=" * 60)
