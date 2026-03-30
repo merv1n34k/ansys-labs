@@ -155,6 +155,10 @@ if os.path.exists(error_path):
 mesh_container.Exit()
 print("Mechanical exited")
 
+# Update Mesh component so WB registers the mesh output
+mesh_comp.Update(AllDependencies=True)
+print("Mesh component updated")
+
 Save(Overwrite=True)
 
 # ==================================================================
@@ -315,6 +319,10 @@ print("Solver control, output, initialization sent")
 # EXIT CFX-Pre before solving (critical!)
 setup_container.Exit()
 print("CFX-Pre exited")
+
+# Update Setup component to generate .def file
+setup_comp.Update(AllDependencies=True)
+print("Setup component updated")
 
 Save(Overwrite=True)
 
