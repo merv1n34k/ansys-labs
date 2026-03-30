@@ -156,8 +156,11 @@ mesh_container.Exit()
 print("Mechanical exited")
 
 # Update Mesh component so WB registers the mesh output
-mesh_comp.Update(AllDependencies=True)
-print("Mesh component updated")
+try:
+    mesh_comp.Update(AllDependencies=True)
+    print("Mesh component updated OK")
+except Exception as e:
+    print("Mesh component Update failed: %s" % e)
 
 Save(Overwrite=True)
 
@@ -316,13 +319,45 @@ PARAMETERIZATION:
 END""")
 print("Solver control, output, initialization sent")
 
+# Explicitly save CFX-Pre case before exiting
+setup_container.SendCommand(Command="> save")
+print("CFX-Pre case saved")
+
 # EXIT CFX-Pre before solving (critical!)
 setup_container.Exit()
 print("CFX-Pre exited")
 
 # Update Setup component to generate .def file
-setup_comp.Update(AllDependencies=True)
-print("Setup component updated")
+try:
+    setup_comp.Update(AllDependencies=True)
+    print("Setup component updated OK")
+except Exception as e:
+    print("Setup component Update failed: %s" % e)
+
+# Check for .def file in project directory
+def_found = False
+for dirpath, dirnames, filenames in os.walk(project_dir):
+    for fn in filenames:
+        if fn.endswith('.def'):
+            def_found = True
+            print("Found .def: %s (%d bytes)" % (
+                os.path.join(dirpath, fn),
+                os.path.getsize(os.path.join(dirpath, fn))))
+# Also check home .ansys dir
+ansys_dir = os.path.expanduser("~/.ansys")
+if os.path.exists(ansys_dir):
+    for wb_dir in os.listdir(ansys_dir):
+        wb_path = os.path.join(ansys_dir, wb_dir)
+        if os.path.isdir(wb_path):
+            for dirpath, dirnames, filenames in os.walk(wb_path):
+                for fn in filenames:
+                    if fn.endswith('.def'):
+                        def_found = True
+                        fpath = os.path.join(dirpath, fn)
+                        print("Found .def in .ansys: %s (%d bytes)" % (
+                            fpath, os.path.getsize(fpath)))
+if not def_found:
+    print("WARNING: no .def file found anywhere")
 
 Save(Overwrite=True)
 
