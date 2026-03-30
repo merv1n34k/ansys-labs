@@ -91,21 +91,9 @@ coil_solid_body = all_bodies[1]
 coil_fluid_body = all_bodies[2]
 
 def get_faces(body):
-    try:
-        faces = list(body.GetChildren(DataModelObjectCategory.GeoFace, True))
-        if faces:
-            _ = faces[0].Centroid
-            print("Tree faces for '%s': %d" % (body.Name, len(faces)))
-            return faces
-    except Exception as e:
-        print("Tree faces failed for '%s': %s" % (body.Name, e))
-    try:
-        faces = list(body.GetGeoBody().Faces)
-        print("GeoData faces for '%s': %d (fallback)" % (body.Name, len(faces)))
-        return faces
-    except Exception as e2:
-        print("GeoData faces also failed for '%s': %s" % (body.Name, e2))
-    return []
+    faces = list(body.GetGeoBody().Faces)
+    print("Faces for '%s': %d" % (body.Name, len(faces)))
+    return faces
 
 def find_nozzle_face(faces, target_x, target_z, max_area):
     candidates = []
@@ -132,7 +120,7 @@ def make_ns(name, faces):
     ns = Model.AddNamedSelection()
     ns.Name = name
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-    sel.Entities = faces
+    sel.Ids = [f.Id for f in faces]
     ns.Location = sel
     print("NS '%s': %d faces" % (name, len(faces)))
 
@@ -177,7 +165,7 @@ vw = [f for f in vessel_faces if f not in vi and f not in vo]
 if vw:
     inflation = mesh.AddInflation()
     sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-    sel.Entities = vw
+    sel.Ids = [f.Id for f in vw]
     inflation.Location = sel
     inflation.MaximumLayers = 3
     inflation.GrowthRate = 1.2
@@ -185,11 +173,16 @@ if vw:
 
 mesh.GenerateMesh()
 
+image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
+image_settings.Background = GraphicsBackgroundType.White
+image_settings.Width = 1920
+image_settings.Height = 1080
+
 mesh.Activate()
 Graphics.Camera.SetFit()
 Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
 Graphics.ViewOptions.ShowLegend = False
-Graphics.ExportImage(os.path.join(results_dir, "mesh.png"))
+Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
 print("Mesh script done")
 """
 
@@ -522,7 +515,7 @@ for func, var, loc, unit in [
     ("minVal", "Temperature", "CoilFluid", "K"),
 ]:
     power_lines.append(
-        "!$v = evaluate('%s(%s)@%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
+        "!my @_r = evaluate('%s(%s)@%s'); $v = $_r[0]; print $fh \"%s,%s,%s,%s,$v\\n\";"
         % (func, var, loc, func, var, loc, unit))
 power_lines.append('!close($fh);')
 
