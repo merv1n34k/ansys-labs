@@ -56,7 +56,6 @@ for b in all_bodies:
     print("  '%s': Volume=%s" % (b.Name, b.Volume))
 
 vessel_body = all_bodies[0]
-pad_body = all_bodies[1] if len(all_bodies) > 1 else None
 
 # -- Mesh --
 mesh = Model.Mesh
@@ -90,27 +89,22 @@ R_IN = 247.9
 SHELL_H = 1000.0
 PAD_W = 50.0
 
-vessel_faces = get_faces(vessel_body)
-for f in vessel_faces:
+faces = get_faces(vessel_body)
+for f in faces:
     r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
-    print("  Vessel face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
+    print("  Face: R=%.1f Z=%.1f area=%.1f" % (r, f.Centroid[2], f.Area))
 
 inner_faces = []
-for f in vessel_faces:
+pad_outer_faces = []
+for f in faces:
     r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
     z = f.Centroid[2]
     if r < R_IN + 0.5 and z < SHELL_H + 1:
         inner_faces.append(f)
-print("Inner vessel faces (pressure): %d" % len(inner_faces))
-
-pad_outer_faces = []
-if pad_body:
-    pad_faces = get_faces(pad_body)
-    for f in pad_faces:
-        r = math.sqrt(f.Centroid[0]**2 + f.Centroid[1]**2)
-        if r > R_OUT + PAD_W * 0.8:
-            pad_outer_faces.append(f)
-    print("Pad outer faces for fixed support: %d" % len(pad_outer_faces))
+    elif r > R_OUT + PAD_W * 0.8:
+        pad_outer_faces.append(f)
+print("Inner faces (pressure): %d" % len(inner_faces))
+print("Pad outer faces (fixed support): %d" % len(pad_outer_faces))
 
 # -- Named Selections --
 ns_pressure = Model.AddNamedSelection()
