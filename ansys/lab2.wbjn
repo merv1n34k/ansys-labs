@@ -301,14 +301,8 @@ if os.path.exists(mesh_done):
 else:
     print("WARNING: mesh_done.txt missing -- script may have crashed")
 
-# Explicitly update mesh component to finalize
-try:
-    mesh_component.Update()
-    print("Mesh component updated OK")
-except Exception as e:
-    print("Mesh component update: %s" % e)
-
-# Save project after mesh
+# Save project after mesh (do NOT call mesh_component.Update() --
+# it can mark downstream components as up-to-date prematurely)
 Save(Overwrite=True)
 print("Project saved after mesh")
 
@@ -457,32 +451,86 @@ print("\n" + "=" * 60)
 print("SOLVER")
 print("=" * 60)
 
-setup_comp = system.GetComponent(Name="Setup")
-print("Updating Setup component...")
-t0 = time.time()
-try:
-    setup_comp.Update()
-    print("Setup updated in %.1fs" % (time.time() - t0))
-except Exception as e:
-    print("Setup Update FAILED in %.1fs: %s" % (time.time() - t0, e))
+def find_solver_files():
+    found = []
+    for dirpath, dirnames, filenames in os.walk(project_dir):
+        for fn in filenames:
+            if fn.endswith(('.def', '.res', '.out', '.mres')):
+                fpath = os.path.join(dirpath, fn)
+                found.append((fpath, os.path.getsize(fpath)))
+    return found
 
-solution_comp = system.GetComponent(Name="Solution")
-print("Updating Solution component (this runs the CFX solver)...")
+# Approach 1: system.Update() -- full cascade
+print("Approach 1: system.Update() (full cascade)...")
 t0 = time.time()
 try:
-    solution_comp.Update()
-    print("Solution updated in %.1fs" % (time.time() - t0))
+    system.Update()
+    print("system.Update() completed in %.1fs" % (time.time() - t0))
 except Exception as e:
-    print("Solution Update FAILED in %.1fs: %s" % (time.time() - t0, e))
+    print("system.Update() FAILED in %.1fs: %s" % (time.time() - t0, e))
+
+solver_files = find_solver_files()
+if solver_files:
+    print("Solver files found after system.Update():")
+    for fp, sz in solver_files:
+        print("  %s (%d bytes)" % (fp, sz))
+else:
+    print("No solver files after system.Update()")
+
+    # Approach 2: Explicit writeDef from CFX-Pre
+    print("\nApproach 2: Explicit CFX-Pre save commands...")
+    try:
+        setup.SendCommand(Command=ccl_content)
+        print("CCL re-sent")
+    except Exception as e:
+        print("CCL re-send failed: %s" % e)
+
+    for cmd in ['> save', '> writeDef']:
+        try:
+            setup.SendCommand(Command=cmd)
+            print("  '%s' OK" % cmd)
+        except Exception as e:
+            print("  '%s' FAILED: %s" % (cmd, e))
+
+    solver_files = find_solver_files()
+    if solver_files:
+        print("Solver files found after writeDef:")
+        for fp, sz in solver_files:
+            print("  %s (%d bytes)" % (fp, sz))
+    else:
+        print("Still no solver files!")
+
+        # Approach 3: Refresh + Update individual components
+        print("\nApproach 3: Refresh + Update components individually...")
+        for comp_name in ["Setup", "Solution"]:
+            comp = system.GetComponent(Name=comp_name)
+            try:
+                comp.Refresh()
+                print("  %s refreshed" % comp_name)
+            except Exception as e:
+                print("  %s refresh: %s" % (comp_name, e))
+            t0 = time.time()
+            try:
+                comp.Update()
+                print("  %s updated in %.1fs" % (comp_name, time.time() - t0))
+            except Exception as e:
+                print("  %s Update FAILED in %.1fs: %s" % (comp_name, time.time() - t0, e))
 
 Save(Overwrite=True)
 print("Project saved after solve")
 
-# Check for solver output files
+# Final solver file check
 print("\n--- SOLVER OUTPUT FILES ---")
-for dirpath, dirnames, filenames in os.walk(project_dir):
-    for fn in filenames:
-        if fn.endswith(('.res', '.trn', '.def', '.out', '.mres', '.dir')):
+solver_files = find_solver_files()
+if solver_files:
+    for fp, sz in solver_files:
+        print("  %s (%d bytes)" % (fp, sz))
+else:
+    print("  NO SOLVER FILES FOUND -- solver did not run")
+    # List ALL files in project dir tree for debugging
+    print("\n--- ALL PROJECT FILES ---")
+    for dirpath, dirnames, filenames in os.walk(project_dir):
+        for fn in filenames:
             fpath = os.path.join(dirpath, fn)
             print("  %s (%d bytes)" % (fpath, os.path.getsize(fpath)))
 
