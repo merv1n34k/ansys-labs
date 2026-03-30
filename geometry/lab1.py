@@ -12,7 +12,7 @@ import cadquery as cq
 from common import make_support_pads, make_vessel_shell
 
 vessel = make_vessel_shell()
-pads = make_support_pads(n_pads=4)
+pads = make_support_pads(n_pads=2, pad_h=250.0)
 body = vessel.union(pads)
 
 step_dir = Path(__file__).parent / "step"
