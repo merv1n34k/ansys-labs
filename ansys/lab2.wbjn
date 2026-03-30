@@ -84,23 +84,28 @@ wall_faces = [f for f in all_faces if f not in inlet_faces and f not in outlet_f
 print("Inlet faces: %d, Outlet faces: %d, Wall faces: %d" % (
     len(inlet_faces), len(outlet_faces), len(wall_faces)))
 
-ns_inlet = Model.AddNamedSelection()
-ns_inlet.Name = "Inlet"
-sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-sel.Ids = [f.Id for f in inlet_faces]
-ns_inlet.Location = sel
+def make_ns(name, faces):
+    ns = Model.AddNamedSelection()
+    ns.Name = name
+    sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
+    ids = [f.Id for f in faces]
+    sel.Ids = ids
+    ns.Location = sel
+    try:
+        ns.Generate()
+    except Exception as e:
+        print("NS '%s' Generate() failed: %s" % (name, e))
+    # Diagnostic: check what Mechanical sees
+    try:
+        loc = ns.Location
+        print("NS '%s': IDs=%s Location=%s State=%s" % (name, ids, loc, ns.ObjectState))
+    except Exception as e:
+        print("NS '%s': IDs=%s (diag failed: %s)" % (name, ids, e))
+    return ns
 
-ns_outlet = Model.AddNamedSelection()
-ns_outlet.Name = "Outlet"
-sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-sel.Ids = [f.Id for f in outlet_faces]
-ns_outlet.Location = sel
-
-ns_wall = Model.AddNamedSelection()
-ns_wall.Name = "Wall"
-sel = ExtAPI.SelectionManager.CreateSelectionInfo(SelectionTypeEnum.GeometryEntities)
-sel.Ids = [f.Id for f in wall_faces]
-ns_wall.Location = sel
+make_ns("Inlet", inlet_faces)
+make_ns("Outlet", outlet_faces)
+make_ns("Wall", wall_faces)
 
 # -- Mesh Settings --
 mesh = Model.Mesh
@@ -129,17 +134,24 @@ if cone_faces:
     print("Cone refinement: %d faces" % len(cone_faces))
 
 mesh.GenerateMesh()
+print("Mesh generated: Elements=%s Nodes=%s" % (mesh.Elements, mesh.Nodes))
 
-image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
-image_settings.Background = GraphicsBackgroundType.White
-image_settings.Width = 1920
-image_settings.Height = 1080
+# Image export (non-critical, wrapped in try/except)
+try:
+    image_settings = Ansys.Mechanical.Graphics.GraphicsImageExportSettings()
+    image_settings.CurrentGraphicsDisplay = False
+    image_settings.Background = GraphicsBackgroundType.White
+    image_settings.Width = 1920
+    image_settings.Height = 1080
+    mesh.Activate()
+    Graphics.Camera.SetFit()
+    Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
+    Graphics.ViewOptions.ShowLegend = False
+    Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
+    print("Mesh image exported")
+except Exception as e:
+    print("Mesh image export failed (non-critical): %s" % e)
 
-mesh.Activate()
-Graphics.Camera.SetFit()
-Graphics.Camera.SetSpecificViewOrientation(ViewOrientationType.Iso)
-Graphics.ViewOptions.ShowLegend = False
-Graphics.ExportImage(os.path.join(results_dir, "mesh.png"), GraphicsImageExportFormat.PNG, image_settings)
 print("Mesh script done")
 """
 
@@ -300,11 +312,21 @@ with open(ccl_path, "w") as f:
 setup.SendCommand(Command=ccl_content)
 
 # -- Solve ---------------------------------------------------------
-# Explicit component updates instead of system.Update()
 setup_comp = system.GetComponent(Name="Setup")
-setup_comp.Update()
+print("Updating Setup component...")
+try:
+    setup_comp.Update()
+    print("Setup updated: state=%s" % setup_comp.GetState())
+except Exception as e:
+    print("Setup Update FAILED: %s" % e)
+
 solution_comp = system.GetComponent(Name="Solution")
-solution_comp.Update()
+print("Updating Solution component...")
+try:
+    solution_comp.Update()
+    print("Solution updated: state=%s" % solution_comp.GetState())
+except Exception as e:
+    print("Solution Update FAILED: %s" % e)
 
 # -- CFX-Post ------------------------------------------------------
 results = system.GetContainer(ComponentName="Results")
@@ -401,7 +423,7 @@ power_lines = [
 ]
 for func, var, loc, unit in calc_pairs:
     power_lines.append(
-        "!my @_r = evaluate('%s(%s)@%s'); $v = $_r[0]; print $fh \"%s,%s,%s,%s,$v\\n\";"
+        "!$v = evaluate('%s(%s)@%s'); print $fh \"%s,%s,%s,%s,$v\\n\";"
         % (func, var, loc, func, var, loc, unit))
 power_lines.append('!close($fh);')
 
