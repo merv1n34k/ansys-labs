@@ -2,9 +2,8 @@
 
 Stadium/capsule-shaped bath with:
   - Filleted bottom edges
-  - Circular emitter recess (D=40mm, 25mm deep) pressed into the bottom
-  - Filleted edge on the emitter recess
-  - Emitter face = top of recess at Z=25mm (selected in ANSYS by geometry)
+  - Circular emitter recess (D=40mm, 5mm deep) pressed into the bottom
+  - Emitter face = flat circle at Z=5mm (clean face for BC in ANSYS)
 """
 
 from pathlib import Path
@@ -21,7 +20,6 @@ BOTTOM_FILLET = 10.0
 # Emitter recess
 EMITTER_D = 40.0
 EMITTER_DEPTH = 5.0
-EMITTER_FILLET = 3.0
 
 # Stadium bath
 bath = (
@@ -41,12 +39,6 @@ emitter_cut = (
     .extrude(EMITTER_DEPTH)
 )
 bath = bath.cut(emitter_cut)
-
-# Fillet the emitter recess edge (circular edge at Z=0 inside the recess)
-# Select the circular edge at the bottom of the recess opening
-bath = bath.edges(
-    cq.selectors.NearestToPointSelector((0, 0, 0))
-).fillet(EMITTER_FILLET)
 
 # Volume check
 vol_mm3 = bath.val().Volume()
