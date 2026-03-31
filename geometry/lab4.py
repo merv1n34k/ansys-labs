@@ -3,6 +3,7 @@
 Stadium/capsule-shaped bath with:
   - Filleted bottom edges
   - Circular emitter recess (D=40mm, 5mm deep) pressed into the bottom
+  - Small fillet (R=2mm) on emitter recess edge
   - Emitter face = flat circle at Z=5mm (clean face for BC in ANSYS)
 """
 
@@ -20,6 +21,7 @@ BOTTOM_FILLET = 10.0
 # Emitter recess
 EMITTER_D = 40.0
 EMITTER_DEPTH = 5.0
+EMITTER_FILLET = 2.0
 
 # Stadium bath
 bath = (
@@ -39,6 +41,11 @@ emitter_cut = (
     .extrude(EMITTER_DEPTH)
 )
 bath = bath.cut(emitter_cut)
+
+# Fillet the emitter recess edge (small radius for clean face)
+bath = bath.edges(
+    cq.selectors.NearestToPointSelector((0, 0, 0))
+).fillet(EMITTER_FILLET)
 
 # Volume check
 vol_mm3 = bath.val().Volume()
