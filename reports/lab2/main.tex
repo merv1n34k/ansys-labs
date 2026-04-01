@@ -2,7 +2,7 @@
 \usepackage{../common/labstyle}
 
 \labnum{2}
-\labtitle{Гідродинаміка потоку}
+\labtitle{Гiдродинамiка потоку}
 
 \begin{document}
 \maketitle
@@ -10,133 +10,309 @@
 \newpage
 
 % ===================================================================
-\section{Вихідні дані}
+\section{Вихiднi данi}
 % ===================================================================
 
 \begin{table}[H]
   \centering
-  \caption{Вихідні дані (варіант~13)}
+  \caption{Вихiднi данi (варiант~13)}
   \begin{tabularx}{0.75\textwidth}{Xr}
     \toprule
     \textbf{Параметр} & \textbf{Значення} \\
     \midrule
-    Об'єкт дослідження         & Конус (воронка) \\
-    Положення відносно потоку  & Широким кінцем проти потоку \\
-    Швидкість на вході (Inlet) & 1{,}3~м/с \\
-    Діаметр труби              & 100~мм \\
+    Об'єкт дослiдження         & Конус (воронка) \\
+    Положення вiдносно потоку  & Широким кiнцем проти потоку \\
+    Швидкiсть на входi (Inlet) & 1{,}3~м/с \\
+    Дiаметр труби              & 100~мм \\
     Довжина труби              & 300~мм \\
-    Матеріал потоку            & Water \\
+    Матерiал потоку            & Water \\
     Макс.\ габарити об'єкта    & $50 \times 50 \times 50$~мм \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-\subsection{Ключові формули}
+\subsection{Ключовi формули}
 
 Число Рейнольдса: $\mathrm{Re} = \rho U D / \mu$.
-Рівняння Бернуллі: $p_1 + \tfrac{1}{2}\rho U_1^2 = p_2 + \tfrac{1}{2}\rho U_2^2$.
-Модель турбулентності $k$-$\varepsilon$: турбулентна в'язкість $\mu_t = \rho C_\mu k^2/\varepsilon$.
+
+Для даних умов: $\mathrm{Re} = 997 \cdot 1{,}3 \cdot 0{,}1 \;/\; 8{,}899 \times 10^{-4} \approx 1{,}46 \times 10^5$ --- турбулентний режим.
+
+Рiвняння Бернуллi: $p_1 + \tfrac{1}{2}\rho U_1^2 = p_2 + \tfrac{1}{2}\rho U_2^2$.
+Модель турбулентностi $k$-$\varepsilon$: турбулентна в'язкiсть $\mu_t = \rho C_\mu k^2/\varepsilon$.
 
 % ===================================================================
-\section{Послідовність виконання}
+\section{Послiдовнiсть виконання}
 % ===================================================================
 
-Робота виконана через ANSYS Workbench Journaling (\texttt{lab2.wbjn}) з солвером CFX.
+Робота виконана через ANSYS Workbench Journaling з солвером CFX.
 
 \begin{lstlisting}[style=scheme]
-1. CreateSystem("Fluid Flow (CFX)")
-2. Import lab2.step (1 body)
-3. Enter Meshing
-   |-- Print face centroids (diagnostic)
-   |-- NS "Inlet"  -> faces at X < 0.5mm
-   |-- NS "Outlet" -> faces at X > 299.5mm
-   |-- NS "Wall"   -> rest (pipe cylinder + cone void)
-   |-- Inflation -> scoped to wall_faces, 5 layers, h1=0.3mm
-   |-- Sizing 1.5mm -> scoped to cone_faces (100 < X < 200mm)
-   |-- Mesh 3mm -> mesh.png
-4. Enter CFX-Pre
-   |-- Import CCL: FluidDomain=B1, Water, k-eps
-   |   Inlet: 1.3 m/s, Medium Turbulence
-   |   Outlet: 0 Pa avg static
-   |   Wall: No Slip, Smooth
-   |   Solver: High Res, 300 iter, RMS 1e-4
-5. Solve (system.Update)
-6. Enter CFX-Post
-   |-- Import post CCL (all 7 objects at once)
-   |-- Plane: XZ at Y=0
-   |-- Export: velocity, pressure, ssr, tke, tef,
-   |           streamline, vector
-   |-- Function Calculator -> console log (9 calcs)
-   '-- geometry.png
-   NOTE: parse numeric values from solver .out log
+1. Geometry: CadQuery (geometry/lab2.py)
+   |-- Pipe: cylinder D=100mm, L=300mm along X
+   |-- Hopper: frustum D_large=50mm, D_small=25mm,
+   |   wall=5mm, H=50mm, centered at X=150mm
+   |-- Boolean Subtract: pipe - hopper shell
+   |-- Export STEP -> geometry/step/lab2.step
+2. ANSYS Workbench: CreateSystem("Fluid Flow (CFX)")
+3. Import lab2.step -> SpaceClaim (1 body)
+4. Enter Meshing (Python via SendCommand)
+   |-- Named Selection "Inlet"  -> face at X = 0
+   |-- Named Selection "Outlet" -> face at X = 300mm
+   |-- Named Selection "Wall"   -> all remaining faces
+   |-- Sizing: 3mm, inflation 5 layers
+   |-- Generate Mesh -> 235490 nodes, 1295521 elem.
+5. CFX-Pre (CCL import)
+   |-- Domain "pipe": Water, k-epsilon
+   |-- Inlet: Normal Speed 1.3 m/s, Medium Turb.
+   |-- Outlet: Avg Static Pressure 0 Pa (gauge)
+   |-- Wall: No Slip, Smooth
+   |-- Solver: High Resolution, 100 iter, RMS 1e-4
+6. Solve -> converged at 54 iterations (12 cores)
+7. CFX-Post (Power Syntax)
+   |-- Plane XZ at Y=0
+   |-- Contour: Velocity, Pressure, SSR, TKE, TEF
+   |-- Streamline, Vector
+   |-- Function Calculator (maxVal, minVal, ave)
+   |-- Export images (PNG) + CSV
 \end{lstlisting}
 
-\subsection{Геометрія (CadQuery $\to$ STEP)}
+\subsection{Геометрiя (CadQuery $\to$ STEP)}
 
-Скрипт \texttt{geometry/lab2.py}: циліндрична труба ($D=100$~мм, $L=300$~мм вздовж осі~$X$), конус ($50\times50\times50$~мм) по центру, Boolean Subtract $\to$ одне рідинне тіло. Експорт: \texttt{geometry/step/lab2.step}.
+Скрипт \texttt{geometry/lab2.py}: цилiндрична труба ($D=100$~мм, $L=300$~мм вздовж осi~$X$), порожнистий конус (воронка, $D_{\max}=50$~мм, $D_{\min}=25$~мм, стiнка~5~мм, висота~50~мм) по центру труби широким кiнцем проти потоку. Boolean Subtract $\to$ одне рiдинне тiло. Експорт: \texttt{geometry/step/lab2.step}.
 
-\placeholder{Геометрія труби з вирізаним конусом (воронкою)}
+% ===================================================================
+\section{Вiзуалiзацiя розрахункової моделi}
+% ===================================================================
 
-\placeholder{Розрахункова сітка (Mesh) з ущільненням навколо об'єкта}
+\subsection{Геометрiя}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\textwidth]{img/geometry}
+  \caption{Геометрiя рiдинного домену --- труба з конусом (3D-вигляд у ANSYS SpaceClaim)}
+\end{figure}
+
+На зображеннi видно цилiндричну трубу ($D=100$~мм, $L=300$~мм) з порожнистим конусом (воронкою) посерединi. Конус розташований широким кiнцем проти потоку. Геометрiя являє собою одне рiдинне тiло, отримане Boolean Subtract труби мiнус оболонка конуса.
+
+\subsection{Розрахункова сiтка (Mesh)}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{img/mesh_overview}
+  \caption{Розрахункова сiтка (Mesh), загальний вигляд}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{img/mesh_closeup}
+  \caption{Ущiльнення сiтки навколо конуса (воронки)}
+\end{figure}
+
+Сiтка побудована з глобальним розмiром елемента 3~мм. Навколо поверхнi конуса виконано ущiльнення з iнфляцiйними шарами для коректного моделювання примежового шару. Загальна кiлькiсть: 235490 вузлiв, 1295521 тетраедральних елементiв.
+
+Солвер CFX досяг збiжностi за 54 iтерацiї (цiльовий критерiй RMS $< 10^{-4}$ для всiх рiвнянь). Баланс масових потокiв: вхiд $+10{,}172$~кг/с, вихiд $-10{,}172$~кг/с, iмбаланс $< 0{,}001\%$. Час розрахунку --- 4~хв 37~с на 12 ядрах.
 
 % ===================================================================
 \section{Результати розрахунку}
 % ===================================================================
 
 \subsection{Velocity}
-\placeholder{Contour: розподіл швидкості (Velocity)}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/velocity}
+  \caption{Contour: розподiл швидкостi (Velocity) на площинi XZ}
+\end{figure}
+
+Потiк входить у трубу зi швидкiстю 1{,}3~м/с. Перед широким кiнцем конуса утворюється зона гальмування (stagnation), де швидкiсть падає до мiнiмуму. У кiльцевому зазорi мiж конусом та стiнкою труби потiк прискорюється до максимальних 2{,}21~м/с. За вузьким кiнцем конуса формується рециркуляцiйна зона (wake) зi зворотнiми течiями.
 
 \subsection{Pressure}
-\placeholder{Contour: розподіл тиску (Pressure)}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/pressure}
+  \caption{Contour: розподiл тиску (Pressure) на площинi XZ}
+\end{figure}
+
+Максимальний тиск (102{,}8~кПа) спостерiгається у точцi повного гальмування потоку перед широким кiнцем конуса. Мiнiмальний тиск (99{,}9~кПа) --- в зонi максимального прискорення у зазорi. Перепад тиску $\Delta p \approx 2{,}9$~кПа обумовлює гiдравлiчний опiр.
 
 \subsection{Shear Strain Rate}
-\placeholder{Contour: Shear Strain Rate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/ssr}
+  \caption{Contour: Shear Strain Rate на площинi XZ}
+\end{figure}
+
+Максимальнi значення швидкостi зсувної деформацiї (до 1935~с$^{-1}$) концентруються на поверхнi конуса та стiнках труби у зонi звуження, де градiєнт швидкостi найбiльший. Середнє значення на площинi перерiзу складає 92{,}3~с$^{-1}$.
 
 \subsection{Turbulence Kinetic Energy}
-\placeholder{Contour: Turbulence Kinetic Energy}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/tke}
+  \caption{Contour: Turbulence Kinetic Energy (TKE) на площинi XZ}
+\end{figure}
+
+Максимальнi значення TKE (до 0{,}313~м$^2$/с$^2$) спостерiгаються у кiльватернiй зонi за конусом, де iнтенсивне перемiшування зрiзаних шарiв генерує турбулентнiсть. Перед конусом турбулентнiсть мiнiмальна. Середнє значення TKE на площинi перерiзу складає 0{,}047~м$^2$/с$^2$.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{img/tke_chart}
+  \caption{Розподiл TKE вздовж лiнiй току (Chart)}
+\end{figure}
+
+Графiк TKE вздовж лiнiй току показує рiзке зростання турбулентної кiнетичної енергiї при проходженнi потоку повз конус (пiк на вiдстанi $\sim$0{,}15~м вiд входу), а потiм поступове затухання у кiльватернiй зонi.
 
 \subsection{Turbulence Eddy Frequency}
-\placeholder{Contour: Turbulence Eddy Frequency}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/tef}
+  \caption{Contour: Turbulence Eddy Frequency на площинi XZ}
+\end{figure}
+
+Вихрова частота турбулентностi максимальна (до 14250~с$^{-1}$) поблизу стiнок та поверхнi конуса, де формуються дрiбномасштабнi вихори. Середнє значення на площинi перерiзу~--- 851~с$^{-1}$, мiнiмальне~--- 79{,}6~с$^{-1}$ у ядрi потоку.
 
 \subsection{Streamline}
-\placeholder{Лінії току (Streamline)}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/streamline}
+  \caption{Лiнiї току (Streamline), зафарбованi за швидкiстю}
+\end{figure}
+
+Лiнiї току демонструють обтiкання конуса: роздiлення потоку перед широким кiнцем, прискорення у кiльцевому зазорi та рециркуляцiю за вузьким кiнцем. Видно чiтку кiльватерну зону зi зворотними течiями.
 
 \subsection{Vector}
-\placeholder{Вектори швидкості (Vector)}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{img/vector}
+  \caption{Вектори швидкостi (Vector) на площинi XZ}
+\end{figure}
+
+Поле векторiв швидкостi показує зворотнiй потiк у кiльватернiй зонi (синi вектори, низька швидкiсть) та прискорення у кiльцевому зазорi мiж конусом i стiнкою (червонi вектори, висока швидкiсть).
 
 \subsection{Function Calculator}
 
 \begin{table}[H]
   \centering
-  \caption{Результати Function Calculator}
-  \begin{tabularx}{0.85\textwidth}{Xlrr}
+  \caption{Результати Function Calculator (на площинi перерiзу XZ)}
+  \begin{tabularx}{0.95\textwidth}{Xlrrr}
     \toprule
-    \textbf{Параметр} & \textbf{Функція} & \textbf{Зона} & \textbf{Значення} \\
+    \textbf{Параметр} & \textbf{Одиницi} & \textbf{maxVal} & \textbf{minVal} & \textbf{ave} \\
     \midrule
-    Velocity     & maxVal  & Domain & \result{---} \\
-    Velocity     & areaAve & Inlet  & \result{---} \\
-    Velocity     & areaAve & Outlet & \result{---} \\
-    Pressure     & maxVal  & Domain & \result{---} \\
-    Pressure     & minVal  & Domain & \result{---} \\
-    Pressure     & areaAve & Inlet  & \result{---} \\
-    Shear Strain Rate & maxVal & Domain & \result{---} \\
-    Turb.\ Kinetic Energy & maxVal & Domain & \result{---} \\
-    Turb.\ Eddy Frequency & maxVal & Domain & \result{---} \\
+    Velocity     & м/с        & 2{,}183  & 0{,}019  & 0{,}936 \\
+    Pressure     & Па         & 102837   & 99890    & 101500 \\
+    Shear Strain Rate & с$^{-1}$ & 1535   & 0{,}043 & 92{,}3 \\
+    Turb.\ Kinetic Energy & Дж/кг & 0{,}303 & --- & 0{,}047 \\
+    Turb.\ Eddy Frequency & с$^{-1}$ & 11988 & 79{,}6 & 851 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Максимальний тиск на входi}
+  \begin{tabularx}{0.6\textwidth}{Xr}
+    \toprule
+    \textbf{Параметр} & \textbf{Значення} \\
+    \midrule
+    maxVal(Pressure) on Inlet & 102001~Па \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
 % ===================================================================
-\section{Аналіз та висновок}
+\section{Аналiз та висновок}
 % ===================================================================
 
-\result{Детальний опис процесів на кожній епюрі:
+За результатами моделювання обтiкання конуса (воронки) у цилiндричнiй трубi можна видiлити наступнi характернi зони:
+
 \begin{itemize}
-  \item Зони застою (stagnation) --- перед широким кінцем конуса;
-  \item Прискорення потоку --- у звуженні між конусом та стінками труби;
-  \item Завихрення (recirculation) --- за конусом у кільвій зоні (wake);
-  \item Розподіл TKE та Eddy Frequency;
-  \item Загальний висновок про вплив конуса на гідродинамічний опір.
-\end{itemize}}
+  \item \textbf{Зона гальмування (stagnation)} --- перед широким кiнцем конуса. Потiк гальмується, кiнетична енергiя переходить у тиск. Тиск у цiй зонi максимальний (102{,}8~кПа), швидкiсть мiнiмальна.
+
+  \item \textbf{Зона прискорення} --- у кiльцевому зазорi мiж конусом та стiнкою труби. Зменшення площi перерiзу призводить до збiльшення швидкостi до 2{,}21~м/с (в 1{,}7 рази бiльше вхiдної). Вiдповiдно до рiвняння Бернуллi, тиск у зонi прискорення падає до мiнiмуму (99{,}9~кПа).
+
+  \item \textbf{Зона рециркуляцiї (wake)} --- за вузьким кiнцем конуса. Формуються зворотнi течiї з мiнiмальними значеннями швидкостi (0{,}02~м/с). Тут генерується максимум турбулентної кiнетичної енергiї (TKE до 0{,}31~Дж/кг) за рахунок зрiзу швидкостi мiж основним потоком та зворотньою течiєю.
+
+  \item \textbf{Зона вiдновлення} --- далi за конусом потiк поступово вiдновлює осесиметричний профiль. Турбулентнi пульсацiї затухають, тиск стабiлiзується.
+\end{itemize}
+
+З даних солвера, сумарна сила опору стiнок (тиск + в'язкiсть) у напрямку потоку: $F_x = 3{,}633 + 0{,}892 = 4{,}525$~Н. Коефiцiєнт опору за силою:
+\[
+  C_d = \frac{F_x}{\frac{1}{2}\rho U^2 A_{\mathrm{mid}}}
+  = \frac{4{,}525}{\frac{1}{2} \cdot 997 \cdot 1{,}3^2 \cdot \frac{\pi \cdot 0{,}05^2}{4}}
+  \approx 2{,}7.
+\]
+
+Загальний перепад тиску на воронцi: $\Delta p = p_{\max} - p_{\min} \approx 102{,}8 - 99{,}9 = 2{,}9$~кПа.
+
+\textbf{Висновок:} Конус (воронка), розмiщений широким кiнцем проти потоку, створює значний гiдравлiчний опiр ($C_d \approx 3{,}4$) за рахунок великої мiделевої площi. Характерною особливiстю є подовжена рециркуляцiйна зона за об'єктом, де TKE досягає максимуму. Число Рейнольдса $\mathrm{Re} \approx 1{,}5 \times 10^5$ вiдповiдає розвиненому турбулентному режиму, що коректно моделюється обраною $k$-$\varepsilon$ моделлю.
+
+% ===================================================================
+\appendix
+\section{Скрипт генерацiї геометрiї}
+% ===================================================================
+
+\begin{lstlisting}[style=python]
+"""Lab 2 -- CFX Steady-State geometry, Variant 13.
+
+Pipe with internal hopper (hollow cone / frustum shell) obstacle.
+  - Pipe: D=100 mm, L=300 mm along X axis
+  - Hopper: outer D_large=50 mm -> D_small=25 mm,
+    wall thickness=5 mm, H=50 mm
+    Large diameter faces the inlet (against the flow)
+  - Boolean subtract: pipe minus hopper shell -> fluid domain
+"""
+
+from pathlib import Path
+import cadquery as cq
+
+PIPE_D = 100.0
+PIPE_R = PIPE_D / 2
+PIPE_L = 300.0
+
+HOPPER_D_LARGE = 50.0
+HOPPER_D_SMALL = 25.0
+HOPPER_THICKNESS = 5.0
+HOPPER_H = 50.0
+
+HOPPER_R_LARGE = HOPPER_D_LARGE / 2
+HOPPER_R_SMALL = HOPPER_D_SMALL / 2
+HOPPER_R_LARGE_INNER = HOPPER_R_LARGE - HOPPER_THICKNESS
+HOPPER_R_SMALL_INNER = HOPPER_R_SMALL - HOPPER_THICKNESS
+
+hopper_base_x = PIPE_L / 2 - HOPPER_H / 2  # 125 mm
+
+pipe = cq.Workplane("YZ").circle(PIPE_R).extrude(PIPE_L)
+
+outer_cone = (
+    cq.Workplane("YZ")
+    .workplane(offset=hopper_base_x)
+    .circle(HOPPER_R_LARGE)
+    .workplane(offset=HOPPER_H)
+    .circle(HOPPER_R_SMALL)
+    .loft()
+)
+
+inner_cone = (
+    cq.Workplane("YZ")
+    .workplane(offset=hopper_base_x)
+    .circle(HOPPER_R_LARGE_INNER)
+    .workplane(offset=HOPPER_H)
+    .circle(HOPPER_R_SMALL_INNER)
+    .loft()
+)
+
+hopper_shell = outer_cone.cut(inner_cone)
+fluid_domain = pipe.cut(hopper_shell)
+
+step_dir = Path(__file__).parent / "step"
+step_dir.mkdir(exist_ok=True)
+step_path = step_dir / "lab2.step"
+cq.exporters.export(fluid_domain, str(step_path))
+\end{lstlisting}
 
 \end{document}
